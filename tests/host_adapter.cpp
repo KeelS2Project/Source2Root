@@ -81,6 +81,14 @@ public:
     void Stop() noexcept override { thread = {}; commands.clear(); variables.clear(); }
     bool IsGameThread() const noexcept override { return thread == std::this_thread::get_id(); }
     KeelResult QueryInterface(KeelSource2Capability capability, KeelSource2InterfaceInfo& info) const noexcept override {
+        if (capability == KEELS2_SOURCE2_CAPABILITY_GAME_EVENT_MANAGER) {
+            auto* manager = SrNetworkGameEventManager();
+            if (!manager) return KEEL_RESULT_NOT_READY;
+            info = {sizeof(info), capability, KEELS2_SOURCE2_FACTORY_NONE, KEELS2_SOURCE2_OWNERSHIP_BORROWED,
+                KEELS2_SOURCE2_LIFETIME_HOST, 0, manager, "IGameEventManager2",
+                "sr_host_adapter", "headless", "source2root-headless-fixture"};
+            return KEEL_RESULT_OK;
+        }
         if (capability != KEELS2_SOURCE2_CAPABILITY_SERVER) return KEEL_RESULT_NOT_FOUND;
         info = {sizeof(info), capability, KEELS2_SOURCE2_FACTORY_SERVER, KEELS2_SOURCE2_OWNERSHIP_BORROWED,
             KEELS2_SOURCE2_LIFETIME_HOST, 0, const_cast<Adapter*>(this), "HeadlessServerMetadata001",
@@ -292,7 +300,6 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT void* SrFixtureFactory(const char* name, i
 extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureCommand(const char* text, int slot) { return active && active->Dispatch(text, slot); }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureFrame() { if (active) active->Frame(); }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureNetworkInitialize(const char* path) { return SrNetworkInitialize(path); }
-extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureNetworkAdvertise() { SrNetworkAdvertise(); }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT const char* SrFixtureMenuText() { return SrNetworkMenuText(); }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureNetworkStop() { return SrNetworkStop(); }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureInput(std::uint64_t buttons, std::uint64_t context, KeelResult result) {

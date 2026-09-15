@@ -17,6 +17,6 @@ extern "C" unsigned SrEngineMapChanges();
 extern "C" const char* SrEngineChangedMap();
 extern "C" bool SrNetworkInitialize(const char* path);
 extern "C" void* SrNetworkInterface(const char* name);
-extern "C" void SrNetworkAdvertise();
+extern "C" void* SrNetworkGameEventManager();
 extern "C" const char* SrNetworkMenuText();
 extern "C" bool SrNetworkStop();

@@ -4,6 +4,7 @@
 
 #include <keels2/authoring.hpp>
 #include <keels2/services.hpp>
+#include <keels2/source2.hpp>
 #include <keels2/convar.h>
 #include <eiface.h>
 
@@ -31,7 +32,8 @@ public:
     bool Load() override {
         try {
             if (runtime_.Connect(HostContext()) != KEEL_RESULT_OK || runtime_.CheckGameThread() != KEEL_RESULT_OK ||
-                services_.Connect(HostContext()) != KEEL_RESULT_OK) return false;
+                services_.Connect(HostContext()) != KEEL_RESULT_OK ||
+                source2_.Connect(HostContext()) != KEEL_RESULT_OK) return false;
             const void* input_service = nullptr;
             if (HostContext().QueryService(KEELS2_PLAYER_INPUT_SERVICE_NAME, KEELS2_PLAYER_INPUT_API_VERSION,
                     &input_service) != KEEL_RESULT_OK) throw std::runtime_error("player input service is unavailable");
@@ -74,10 +76,6 @@ public:
             auto* events = GetEngineInterface<IGameEventSystem>(GAMEEVENTSYSTEM_INTERFACE_VERSION);
             if (messages && events) {
                 menu_ = std::make_unique<sr::Cs2MenuBackend>(messages, events);
-                using Post = void (IGameEventSystem::*)(CSplitScreenSlot, bool, int, const uint64*,
-                    INetworkMessageInternal*, const CNetMessage*, unsigned long, NetChannelBufType_t);
-                if (!HookPre(events, static_cast<Post>(&IGameEventSystem::PostEventAbstract), &Source2Root::ObserveMessage))
-                    throw std::runtime_error(LastError());
             } else Log("menu transport is unavailable; " + std::string(LastError()));
             return true;
         } catch (const std::exception& error) {
@@ -99,7 +97,7 @@ public:
         }
         return true;
     }
-    void Unload() override { foundation_.reset(); menu_.reset(); core_settings_.clear(); restart_ = 0; convars_ = nullptr; player_input_ = nullptr; }
+    void Unload() override { foundation_.reset(); menu_.reset(); game_event_manager_ = nullptr; core_settings_.clear(); restart_ = 0; convars_ = nullptr; player_input_ = nullptr; }
     void OnAllPluginsLoaded() override {
         if (!foundation_) return;
         foundation_->Discover();
@@ -147,7 +145,6 @@ public:
     }
     void OnLevelShutdown() override {
         if (foundation_) foundation_->MapChanged();
-        if (menu_) menu_->MapChanged();
     }
     bool OnClientCommand(CPlayerSlot slot, const CCommand& command) override {
         if (!foundation_ || command.ArgC() < 2 ||
@@ -335,7 +332,13 @@ public:
     }
     KeelResult RenderMenu(const sr::Player& player, const std::string& html) override {
         if (!menu_) return KEEL_RESULT_NOT_READY;
-        auto result = menu_->Render(player.slot, html);
+        if (!game_event_manager_) {
+            keels2::source2::Interface manager;
+            const auto query = source2_.Query(keels2::source2::Capability::game_event_manager, manager);
+            if (query != KEEL_RESULT_OK) return query;
+            game_event_manager_ = manager.Get<IGameEventManager2>();
+        }
+        auto result = menu_->Render(game_event_manager_, player.slot, html);
         if (result != KEEL_RESULT_OK) {
             if (last_menu_error_ != menu_->Error()) Log(menu_->Error());
             last_menu_error_ = menu_->Error();
@@ -382,7 +385,9 @@ private:
     std::filesystem::path root_;
     std::unique_ptr<sr::Foundation> foundation_;
     std::unique_ptr<sr::Cs2MenuBackend> menu_;
+    IGameEventManager2* game_event_manager_ = nullptr;
     keels2::services::Service services_;
+    keels2::source2::Service source2_;
     keels2::source2::NativeRuntime runtime_;
     SrExtensionApi api_{};
     KeelServiceHandle publication_ = 0;
@@ -624,11 +629,6 @@ private:
         else if (value == "select") input = sr::MenuInput::Select;
         else if (value == "back") input = sr::MenuInput::Back;
         if (input) foundation_->MenuInput(player, session, *input);
-    }
-    Action ObserveMessage(HookCall<void>&, CSplitScreenSlot, bool, int, const uint64*,
-        INetworkMessageInternal*, const CNetMessage* message, unsigned long, NetChannelBufType_t) {
-        if (menu_) menu_->Observe(message);
-        return PLUGIN_CONTINUE;
     }
     template <typename Operation>
     static KeelResult Call(void* context, Operation operation, bool cleanup = false) noexcept {

@@ -1,4 +1,6 @@
 #include "host_fixture.h"
+#include "gameevents.pb.h"
+#include <igameevents.h>
 #include <engine/igameeventsystem.h>
 #include <networksystem/inetworkmessages.h>
 #include <keels2/keelhook.hpp>
@@ -21,11 +23,14 @@ using PostMethod = void (IGameEventSystem::*)(CSplitScreenSlot, bool, int, const
 struct NetworkFixture {
     google::protobuf::DescriptorPool pool;
     google::protobuf::DynamicMessageFactory factory{&pool};
-    std::unique_ptr<Message> list, output;
-    std::array<void*, 128> messages_table{}, definition_table{}, packet_table{}, events_table{};
+    std::unique_ptr<Message> output;
+    std::array<void*, 128> messages_table{}, definition_table{}, packet_table{}, events_table{}, manager_table{}, event_table{};
     Interface messages{messages_table.data()}, definition{definition_table.data()}, events{events_table.data()};
-    Packet outgoing{packet_table.data(), nullptr}, advertised{packet_table.data(), nullptr};
-    std::string html;
+    Interface manager{manager_table.data()}, event{event_table.data()};
+    Packet outgoing{packet_table.data(), nullptr};
+    std::string html, token;
+    int duration = -1, player = -1;
+    unsigned active_events = 0;
     unsigned allocations = 0;
 };
 alignas(NetworkFixture) std::array<std::byte, sizeof(NetworkFixture)> network_storage{};
@@ -55,14 +60,13 @@ void Release(void*, INetworkMessageInternal* definition, CNetMessage* message) {
 }
 void Post(void*, CSplitScreenSlot slot, bool local, int count, const uint64* mask,
     INetworkMessageInternal*, const CNetMessage* message, unsigned long size, NetChannelBufType_t buffer) {
-    if (message == reinterpret_cast<CNetMessage*>(&network->advertised)) return;
     Check(slot.Get() == -1 && !local && count == ABSOLUTE_PLAYER_LIMIT && mask && mask[0] == 8 &&
         size == 0 && buffer == BUF_RELIABLE && message == reinterpret_cast<CNetMessage*>(&network->outgoing));
     for (unsigned i = 1; i < (ABSOLUTE_PLAYER_LIMIT + 63) / 64; ++i) Check(!mask[i]);
     auto& output = *network->output;
     const auto* reflection = output.GetReflection();
     const auto* fields = output.GetDescriptor();
-    Check(reflection->GetInt32(output, fields->FindFieldByName("eventid")) == 413);
+    Check(reflection->GetInt32(output, fields->FindFieldByName("eventid")) == 413 && network->active_events == 1);
     const auto& key = reflection->GetRepeatedMessage(output, fields->FindFieldByName("keys"), 1);
     network->html = key.GetReflection()->GetString(key, key.GetDescriptor()->FindFieldByName("val_string"));
 }
@@ -75,6 +79,37 @@ void Text(Message& message, const char* name, const char* value) {
 Message* Add(Message& message, const char* name) {
     return message.GetReflection()->AddMessage(&message, message.GetDescriptor()->FindFieldByName(name));
 }
+IGameEvent* Create(void*, const char* name, bool force, int* cookie) {
+    Check(std::strcmp(name, "show_survival_respawn_status") == 0 && force && !cookie && !network->active_events);
+    ++network->active_events;
+    network->token.clear(); network->duration = network->player = -1;
+    return reinterpret_cast<IGameEvent*>(&network->event);
+}
+void EventText(void*, const GameEventKeySymbol_t& key, const char* value) {
+    Check(std::strcmp(key.GetString(), "loc_token") == 0); network->token = value;
+}
+void EventInt(void*, const GameEventKeySymbol_t& key, int value) {
+    Check(std::strcmp(key.GetString(), "duration") == 0); network->duration = value;
+}
+void EventPlayer(void*, const GameEventKeySymbol_t& key, CPlayerSlot value) {
+    Check(std::strcmp(key.GetString(), "userid") == 0); network->player = value.Get();
+}
+void Free(void*, IGameEvent* event) {
+    Check(event == reinterpret_cast<IGameEvent*>(&network->event) && network->active_events == 1);
+    --network->active_events;
+}
+bool Serialize(void*, IGameEvent* event, CNetMessagePB<CMsgSource1LegacyGameEvent>* packet) {
+    Check(event == reinterpret_cast<IGameEvent*>(&network->event) &&
+        reinterpret_cast<void*>(packet) == &network->outgoing && network->active_events == 1 &&
+        network->duration >= 0 && network->player == 3);
+    auto& output = *network->output;
+    Integer(output, "eventid", 413); Text(output, "event_name", "show_survival_respawn_status");
+    auto* duration = Add(output, "keys"); Integer(*duration, "type", 3); Integer(*duration, "val_long", network->duration);
+    auto* token = Add(output, "keys"); Integer(*token, "type", 1); Text(*token, "val_string", network->token.c_str());
+    auto* player = Add(output, "keys"); Integer(*player, "type", 3); Integer(*player, "val_long", network->player);
+    return true;
+}
+
 }
 
 extern "C" bool SrNetworkInitialize(const char* path) {
@@ -94,19 +129,20 @@ extern "C" bool SrNetworkInitialize(const char* path) {
             Check(descriptor != nullptr);
             return std::unique_ptr<Message>(network->factory.GetPrototype(descriptor)->New());
         };
-        network->list = create("CMsgSource1LegacyGameEventList");
         network->output = create("CMsgSource1LegacyGameEvent");
-        auto* entry = Add(*network->list, "descriptors");
-        Integer(*entry, "eventid", 413); Text(*entry, "name", "show_survival_respawn_status");
-        for (const auto& [name, type] : {std::pair{"duration", 4}, {"loc_token", 1}, {"userid", 3}}) {
-            auto* key = Add(*entry, "keys"); Text(*key, "name", name); Integer(*key, "type", type);
-        }
         Install<&CNetMessage::AsProto>(network->packet_table, &AsProto);
         Install<&INetworkMessages::FindNetworkMessage>(network->messages_table, &Find);
         Install<&INetworkMessages::DeallocateNetMessageAbstract>(network->messages_table, &Release);
         Install<&INetworkMessageInternal::AllocateMessage>(network->definition_table, &Allocate);
         Install<static_cast<PostMethod>(&IGameEventSystem::PostEventAbstract)>(network->events_table, &Post);
-        network->outgoing.proto = network->output.get(); network->advertised.proto = network->list.get();
+        Install<&IGameEventManager2::CreateEvent>(network->manager_table, &Create);
+        Install<&IGameEventManager2::FreeEvent>(network->manager_table, &Free);
+        Install<&IGameEventManager2::SerializeEvent>(network->manager_table, &Serialize);
+        Install<&IGameEvent::SetString>(network->event_table, &EventText);
+        Install<&IGameEvent::SetInt>(network->event_table, &EventInt);
+        using SetPlayerMethod = void (IGameEvent::*)(const GameEventKeySymbol_t&, CPlayerSlot);
+        Install<static_cast<SetPlayerMethod>(&IGameEvent::SetPlayer)>(network->event_table, &EventPlayer);
+        network->outgoing.proto = network->output.get();
         return true;
     } catch (...) { if (network) std::destroy_at(network); network = nullptr; return false; }
 }
@@ -116,14 +152,10 @@ extern "C" void* SrNetworkInterface(const char* name) {
     if (std::strcmp(name, GAMEEVENTSYSTEM_INTERFACE_VERSION) == 0) return &network->events;
     return nullptr;
 }
-extern "C" void SrNetworkAdvertise() {
-    Check(network != nullptr);
-    reinterpret_cast<IGameEventSystem*>(&network->events)->PostEventAbstract(CSplitScreenSlot(-1), false, 0, nullptr,
-        nullptr, reinterpret_cast<const CNetMessage*>(&network->advertised), 0, BUF_RELIABLE);
-}
+extern "C" void* SrNetworkGameEventManager() { return network ? &network->manager : nullptr; }
 extern "C" const char* SrNetworkMenuText() { return network ? network->html.c_str() : ""; }
 extern "C" bool SrNetworkStop() {
-    const bool clear = !network || !network->allocations;
+    const bool clear = !network || (!network->allocations && !network->active_events);
     if (network) std::destroy_at(network);
     network = nullptr;
     google::protobuf::ShutdownProtobufLibrary();

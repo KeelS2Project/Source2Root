@@ -110,7 +110,6 @@ int main(int argc, char** argv) {
         Library adapter(bin / adapter_name);
         Library host(bin / host_name);
         auto network_init = adapter.Get<bool (*)(const char*)>("SrFixtureNetworkInitialize");
-        auto network_advertise = adapter.Get<void (*)()>("SrFixtureNetworkAdvertise");
         auto menu_text = adapter.Get<const char* (*)()>("SrFixtureMenuText");
         auto network_stop = adapter.Get<bool (*)()>("SrFixtureNetworkStop");
         auto input_state = adapter.Get<void (*)(std::uint64_t, std::uint64_t, KeelResult)>("SrFixtureInput");
@@ -427,10 +426,9 @@ int main(int argc, char** argv) {
         };
         auto answers = [&] { return occurrences(chat(), "SourcePawn and the C++ extension returned 42."); };
         if (argc >= 12) {
-            network_advertise();
             input_state(KEELS2_BUTTON_USE, 1, KEEL_RESULT_OK);
             Check(command("sr_hello", 3), "client opens actual module menu");
-            Check(std::string(menu_text()).find("Forward/Back: navigate") != std::string::npos, "module renders action hints through learned event");
+            Check(std::string(menu_text()).find("Forward/Back: navigate") != std::string::npos, "module renders action hints through native serialization without an advertisement");
             const auto selected = [&] { return occurrences(chat(), "The menu selection ran in SourcePawn."); };
             const auto before_selection = selected();
             frame(); frame();
