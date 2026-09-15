@@ -78,6 +78,14 @@ def main():
     binaries = build / args.configuration if WINDOWS else build
     keel = output / "build-keels2"
     deps = output / "deps"
+    pawn = output / "build-sourcepawn"
+    pawn_arch = OS + "-x86_64"
+    compiler = "spcomp.exe" if WINDOWS else "spcomp"
+    compiler_banner = subprocess.run([pawn / "spcomp" / pawn_arch / compiler],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+    if not re.search(r"^SourcePawn Compiler " + re.escape(LOCK["sourcepawn"]["version"]) + r"(?:\.|\s|$)",
+                     compiler_banner, re.M):
+        raise RuntimeError("Built SourcePawn compiler version does not match the dependency lock; rebuild dependencies")
     stage = output / "package-stage"
     if stage.exists():
         shutil.rmtree(stage)
@@ -139,8 +147,6 @@ def main():
     native = native_root / PLATFORM
     module_prefix = "" if WINDOWS else "lib"
     copy(binaries / (module_prefix + "source2root" + SUFFIX), native / ("source2root" + SUFFIX))
-    pawn = output / "build-sourcepawn"
-    pawn_arch = OS + "-x86_64"
     copy(pawn / "libsourcepawn" / pawn_arch / ("libsourcepawn" + SUFFIX),
          runtime / "addons/source2root/bin" / PLATFORM / ("libsourcepawn" + SUFFIX))
     for manifest in sorted((ROOT / "plugins").glob("*/plugin.json")):
@@ -159,7 +165,6 @@ def main():
     tree(ROOT / "examples", developer / "examples")
     tree(ROOT / "plugins", developer / "plugins")
     tree(ROOT / "scripting", developer / "scripting")
-    compiler = "spcomp.exe" if WINDOWS else "spcomp"
     copy(pawn / "spcomp" / pawn_arch / compiler, developer / "compiler/bin" / PLATFORM / compiler)
     for package in (runtime, developer):
         for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "dependencies.lock.json"):

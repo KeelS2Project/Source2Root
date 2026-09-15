@@ -83,6 +83,12 @@ def main():
                        '-DCMAKE_EXE_LINKER_FLAGS=/PDBALTPATH:%_PDB%']
     pawn_build = output / "build-sourcepawn"
     pawn_build.mkdir(exist_ok=True)
+    pawn_version = (deps / "sourcepawn/product.version").read_text().strip()
+    if pawn_version != LOCK["sourcepawn"]["version"]:
+        raise RuntimeError("SourcePawn source version does not match the dependency lock")
+    version_header = pawn_build / "includes/sourcemod_version.h"
+    if version_header.exists() and f'#define SM_VERSION_STRING "{pawn_version}"' not in version_header.read_text().splitlines():
+        version_header.unlink()
     pawn_options = ["--targets=x86_64", "--enable-optimize"]
     if os.name != "nt":
         pawn_options.append("--enable-debug")
