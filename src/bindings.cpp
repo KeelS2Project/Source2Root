@@ -207,13 +207,13 @@ void Foundation::Bind(Script& script) {
         if (!CloseDisplay(player.slot)) { script.error = "previous menu clear failed"; return 0; }
         if (next_session_ == std::numeric_limits<std::uint64_t>::max()) throw NativeError("menu session IDs exhausted");
         menu.menu.selected = 0;
-        const auto result = host_.RenderMenu(player, menu.menu.Html());
+        const auto result = host_.RenderMenu(player, menu.menu.Html(), args.Int(3));
         if (result != KEEL_RESULT_OK) {
             script.error = "menu renderer unavailable (KeelResult " + std::to_string(result) + ")"; return 0;
         }
         const auto session = next_session_++;
         displays_.emplace(player.slot, Display{session, &script, args.Int(1), args.Int(2), player,
-            now_ + std::chrono::milliseconds(args.Int(3)), now_ + std::chrono::milliseconds(250), {}});
+            now_ + std::chrono::milliseconds(args.Int(3)), {}});
         const auto controls = InitialMenuControls(player);
         if (auto found = displays_.find(player.slot); found != displays_.end() && found->second.session == session)
             found->second.controls = controls;

@@ -46,7 +46,7 @@ public:
     KeelResult RemoveEvent(const std::string& name) override {
         return events.erase(name) ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
     }
-    KeelResult RenderMenu(const sr::Player& recipient, const std::string&) override {
+    KeelResult RenderMenu(const sr::Player& recipient, const std::string&, int) override {
         if (fail_render) return KEEL_RESULT_ENGINE_FAILURE;
         Require(recipient.SameConnection(player), "render targets actual connection");
         ++renders; return KEEL_RESULT_OK;

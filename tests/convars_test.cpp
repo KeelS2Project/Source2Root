@@ -66,7 +66,7 @@ public:
     }
     KeelResult ListenEvent(const std::string&) override { return KEEL_RESULT_UNSUPPORTED; }
     KeelResult RemoveEvent(const std::string&) override { return KEEL_RESULT_UNSUPPORTED; }
-    KeelResult RenderMenu(const sr::Player&, const std::string&) override { return KEEL_RESULT_UNSUPPORTED; }
+    KeelResult RenderMenu(const sr::Player&, const std::string&, int) override { return KEEL_RESULT_UNSUPPORTED; }
     KeelResult AcquireProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     KeelResult ReleaseProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
 };

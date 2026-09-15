@@ -35,7 +35,7 @@ public:
     KeelResult RemoveCommand(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult ListenEvent(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult RemoveEvent(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RenderMenu(const sr::Player&,const std::string& value) override { menu=value; return KEEL_RESULT_OK; }
+    KeelResult RenderMenu(const sr::Player&,const std::string& value, int) override { menu=value; return KEEL_RESULT_OK; }
     KeelResult AcquireProvider(const std::string&,unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     KeelResult ReleaseProvider(const std::string&,unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     unsigned Count(int slot) const { unsigned result=0; for (const auto& message:messages) result+=message.slot==slot; return result; }

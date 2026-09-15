@@ -38,7 +38,7 @@ public:
     KeelResult RemoveCommand(const std::string& name) override { return commands.erase(name) ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND; }
     KeelResult ListenEvent(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult RemoveEvent(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RenderMenu(const sr::Player&, const std::string& html) override { menu = html; return KEEL_RESULT_OK; }
+    KeelResult RenderMenu(const sr::Player&, const std::string& html, int) override { menu = html; return KEEL_RESULT_OK; }
     KeelResult AcquireProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     KeelResult ReleaseProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     bool Contains(const std::string& part) const {

@@ -70,6 +70,10 @@ void Post(void*, CSplitScreenSlot slot, bool local, int count, const uint64* mas
     Check(reflection->GetInt32(output, fields->FindFieldByName("eventid")) == 413 && network->active_events == 1);
     const auto& key = reflection->GetRepeatedMessage(output, fields->FindFieldByName("keys"), 1);
     network->html = key.GetReflection()->GetString(key, key.GetDescriptor()->FindFieldByName("val_string"));
+    const auto& lifetime = reflection->GetRepeatedMessage(output, fields->FindFieldByName("keys"), 0);
+    const auto duration = lifetime.GetReflection()->GetInt32(lifetime, lifetime.GetDescriptor()->FindFieldByName("val_long"));
+    Check(!network->html.empty() && duration >= 0 && duration <= 120);
+    if (duration == 0) network->html.clear();
 }
 void Integer(Message& message, const char* name, int value) {
     message.GetReflection()->SetInt32(&message, message.GetDescriptor()->FindFieldByName(name), value);

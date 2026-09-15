@@ -142,13 +142,6 @@ void Foundation::Tick(Clock::time_point now) {
             handles_.Remove(display.menu, display.script->owner, MenuType);
             displays_.erase(slot); continue;
         }
-        if (result != KEEL_RESULT_OK) continue;
-        if (display.redraw <= now_) {
-            auto& menu = std::get<ScriptMenu>(handles_.Get(display.menu, display.script->owner, MenuType));
-            if (host_.RenderMenu(current, menu.menu.Html()) != KEEL_RESULT_OK)
-                display.script->error = "menu redraw failed";
-            display.redraw = now_ + std::chrono::milliseconds(250);
-        }
     }
     PollMenuInput();
 }
@@ -254,7 +247,14 @@ bool Foundation::MenuInput(const Player& player, std::uint64_t session, sr::Menu
         if (!CloseDisplay(player.slot)) return false;
         return Invoke(*display.script, callback, {display.player_handle, selected});
     }
-    if (action == MenuAction::Changed) return host_.RenderMenu(player, menu.menu.Html()) == KEEL_RESULT_OK;
+    if (action == MenuAction::Changed) {
+        if (host_.RenderMenu(player, menu.menu.Html(),
+            static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(display.expires - now_).count())) == KEEL_RESULT_OK) return true;
+        if (CurrentMenu(player) == session) {
+            displays_.at(player.slot).expires = now_;
+            CloseDisplay(player.slot);
+        }
+    }
     return false;
 }
 

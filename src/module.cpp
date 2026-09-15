@@ -330,7 +330,7 @@ public:
     KeelResult RemoveEvent(const std::string& name) override {
         return StopListeningForGameEvent(name.c_str()) ? KEEL_RESULT_OK : KEEL_RESULT_BUSY;
     }
-    KeelResult RenderMenu(const sr::Player& player, const std::string& html) override {
+    KeelResult RenderMenu(const sr::Player& player, const std::string& html, int duration_ms) override {
         if (!menu_) return KEEL_RESULT_NOT_READY;
         if (!game_event_manager_) {
             keels2::source2::Interface manager;
@@ -338,7 +338,7 @@ public:
             if (query != KEEL_RESULT_OK) return query;
             game_event_manager_ = manager.Get<IGameEventManager2>();
         }
-        auto result = menu_->Render(game_event_manager_, player.slot, html);
+        auto result = menu_->Render(game_event_manager_, player.slot, html, duration_ms);
         if (result != KEEL_RESULT_OK) {
             if (last_menu_error_ != menu_->Error()) Log(menu_->Error());
             last_menu_error_ = menu_->Error();
@@ -348,7 +348,17 @@ public:
     KeelResult ReadPlayerInput(const sr::Player& player, KeelPlayerInput& input) override {
         input = {sizeof(input), 0, 0, 0};
         const KeelPlayerConnection connection{player.slot, 0, player.connection};
-        return player_input_ ? player_input_->read(HostContext().PluginHandle(), &connection, &input) : KEEL_RESULT_NOT_READY;
+        const auto result = player_input_ ? player_input_->read(HostContext().PluginHandle(), &connection, &input) : KEEL_RESULT_NOT_READY;
+        if (result == KEEL_RESULT_OK) input_errors_.erase(player.slot);
+        else {
+            const auto failure = std::pair{player.connection, result};
+            const auto previous = input_errors_.find(player.slot);
+            if (previous == input_errors_.end() || previous->second != failure) {
+                input_errors_[player.slot] = failure;
+                Log("menu input unavailable for slot " + std::to_string(player.slot) + " (KeelResult " + std::to_string(result) + ")");
+            }
+        }
+        return result;
     }
     KeelResult AcquireProvider(const std::string& service, unsigned version) override {
         const void* value = nullptr;
@@ -359,6 +369,7 @@ public:
     }
 private:
     const KeelPlayerInputApi* player_input_ = nullptr;
+    std::map<int, std::pair<std::uint64_t, KeelResult>> input_errors_;
     Action Listening(HookCall<bool>& call, CPlayerSlot receiver, CPlayerSlot sender, bool& listening) {
         if (!foundation_) return PLUGIN_CONTINUE;
         auto result = runtime_.CheckGameThread();

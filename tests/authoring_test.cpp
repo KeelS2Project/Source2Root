@@ -32,7 +32,7 @@ public:
     KeelResult RemoveCommand(const std::string& name) override {
         return commands.erase(name) ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
     }
-    KeelResult RenderMenu(const sr::Player& target, const std::string& html) override {
+    KeelResult RenderMenu(const sr::Player& target, const std::string& html, int) override {
         sr::Player current;
         Require(Lookup(target.slot, current) == KEEL_RESULT_OK && target.SameConnection(current), "menu must target the current connection");
         menu = html;

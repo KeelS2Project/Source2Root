@@ -441,7 +441,13 @@ int main(int argc, char** argv) {
             Check(command("sr_hello", 3), "reopen native module menu");
             input_state(KEELS2_BUTTON_USE, 2, KEEL_RESULT_OK); frame(); frame();
             Check(selected() == before_selection + 1 && *menu_text(), "native module resets context baseline");
-            input_state(0, 2, KEEL_RESULT_NOT_READY); frame();
+            const auto input_errors = [&] { return occurrences(messages(), "menu input unavailable for slot 3 (KeelResult "); };
+            const auto before_errors = input_errors();
+            input_state(0, 2, KEEL_RESULT_NOT_READY); frame(); frame(); frame();
+            Check(input_errors() == before_errors + 1, "persistent input failure logs once without per-frame spam");
+            input_state(KEELS2_BUTTON_USE, 2, KEEL_RESULT_OK); frame();
+            input_state(0, 2, KEEL_RESULT_NOT_READY); frame(); frame();
+            Check(input_errors() == before_errors + 2, "new input failure after recovery is reported");
             input_state(KEELS2_BUTTON_USE, 2, KEEL_RESULT_OK); frame();
             Check(selected() == before_selection + 1, "native module resets after adapter read failure");
             input_state(0, 2, KEEL_RESULT_OK); frame();

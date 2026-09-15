@@ -14,10 +14,12 @@ public:
     std::map<int, sr::Player> players;
     std::map<int, KeelPlayerInput> input;
     std::map<int, std::string> menus;
+    std::map<int, int> durations;
+    unsigned renders = 0;
     std::vector<std::string> replies;
     std::function<void()> on_read;
     KeelResult input_result = KEEL_RESULT_OK;
-    bool throw_input = false, fail_clear = false, fail_release = false;
+    bool throw_input = false, fail_clear = false, fail_render = false, fail_release = false;
     unsigned leases = 0, input_reads = 0;
     KeelResult Lookup(int slot, sr::Player& player) override {
         if (!players.contains(slot)) return KEEL_RESULT_NOT_FOUND;
@@ -32,9 +34,11 @@ public:
     KeelResult RemoveCommand(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult ListenEvent(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult RemoveEvent(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RenderMenu(const sr::Player& player, const std::string& html) override {
+    KeelResult RenderMenu(const sr::Player& player, const std::string& html, int duration_ms) override {
         Require(players.contains(player.slot) && player.SameConnection(players.at(player.slot)), "render cannot follow reused slot");
-        if (html.empty() && fail_clear) return KEEL_RESULT_ENGINE_FAILURE;
+        if (html.empty() ? fail_clear : fail_render) return KEEL_RESULT_ENGINE_FAILURE;
+        ++renders; durations[player.slot] = duration_ms;
+        Require(html.empty() ? duration_ms == 0 : duration_ms > 0, "render carries a finite lifetime or explicit close");
         menus[player.slot] = html; return KEEL_RESULT_OK;
     }
     KeelResult ReadPlayerInput(const sr::Player& player, KeelPlayerInput& state) override {
@@ -96,6 +100,18 @@ int main(int argc, char** argv) {
         host.input[slot].buttons = 0; tick();
         host.input[slot].buttons = button; tick();
     };
+    tick();
+    open();
+    Require(host.durations.at(3) == 10000, "script initial packet uses requested lifetime");
+    auto renders = host.renders;
+    for (int i = 0; i < 80; ++i) tick();
+    Require(host.renders == renders && app.CurrentMenu(host.players.at(3)), "idle script menu does not replay display events");
+    press(KEELS2_BUTTON_BACK);
+    Require(host.renders == renders + 1 && host.durations.at(3) == 8688,
+        "script selection sends one update with remaining lifetime");
+    now += std::chrono::milliseconds(8688); app.Tick(now);
+    Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && host.durations.at(3) == 0,
+        "selection does not extend script expiry and expiry clears the display");
     host.input[3].buttons = KEELS2_BUTTON_USE;
     open(); const auto first = app.CurrentMenu(host.players.at(3));
     tick(); tick();
@@ -170,6 +186,14 @@ int main(int argc, char** argv) {
     now += std::chrono::seconds(11); tick();
     Require(!app.CurrentMenu(host.players.at(3)), "expired script menu stops input");
 
+    host.input[3].buttons = 0; open();
+    host.fail_render = host.fail_clear = true;
+    press(KEELS2_BUTTON_BACK);
+    press(KEELS2_BUTTON_USE);
+    Require(host.replies.empty(), "failed script update and clear cannot execute an unseen selection");
+    host.fail_render = host.fail_clear = false; tick();
+    Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty(), "failed script update retries cleanup after transport recovery");
+
     NativeAction native, peer;
     const SrMenuItem items[] = {{"Native action", KEEL_TRUE}};
     const auto native_open = [&](int slot, NativeAction& action) {
@@ -182,6 +206,18 @@ int main(int argc, char** argv) {
         return id;
     };
     host.input[3].buttons = host.input[4].buttons = 0;
+    native_open(3, native);
+    Require(host.durations.at(3) == 10000, "native initial packet uses requested lifetime");
+    renders = host.renders;
+    for (int i = 0; i < 80; ++i) tick();
+    Require(host.renders == renders && app.CurrentMenu(host.players.at(3)), "idle native menu does not replay display events");
+    press(KEELS2_BUTTON_BACK);
+    Require(host.renders == renders + 1 && host.durations.at(3) == 8688,
+        "native navigation uses remaining lifetime");
+    now += std::chrono::milliseconds(8688); app.Tick(now);
+    Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && host.durations.at(3) == 0 && !host.leases,
+        "native expiry is unchanged by navigation and releases display and provider");
+    host.input[3].buttons = 0;
     native_open(3, native); const auto peer_session = native_open(4, peer);
     Require(host.leases == 1, "native menus share one provider lease");
     native.callback = [&] { Require(app.CloseNativeMenu(50, peer_session) == KEEL_RESULT_OK, "native callback closes another sampled session"); native_open(4, peer); };
@@ -208,6 +244,13 @@ int main(int argc, char** argv) {
     Require(app.PreparePause() && !host.leases, "native platform pause closes native input menu");
     app.NativeResumed(); tick();
     Require(!app.CurrentMenu(host.players.at(3)), "resume cannot revive old native menu input");
+    host.input[3].buttons = 0; native_open(3, native);
+    host.fail_render = host.fail_clear = true;
+    press(KEELS2_BUTTON_BACK);
+    press(KEELS2_BUTTON_USE);
+    Require(native.calls == 1 && host.leases == 1, "failed native update and clear retain cleanup without invoking a selection");
+    host.fail_render = host.fail_clear = false; tick();
+    Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && !host.leases, "native update failure retries cleanup after transport recovery");
     Require(app.Shutdown(), "clean input shutdown");
     const auto reads = host.input_reads; tick();
     Require(host.input_reads == reads, "no polling after all menu sessions close");

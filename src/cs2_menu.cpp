@@ -8,9 +8,10 @@
 
 namespace sr {
 
-KeelResult Cs2MenuBackend::Render(IGameEventManager2* manager, int slot, const std::string& html) {
-    if (slot < 0 || slot >= ABSOLUTE_PLAYER_LIMIT || html.size() > 2048) {
-        error_ = "invalid menu recipient or text length";
+KeelResult Cs2MenuBackend::Render(IGameEventManager2* manager, int slot, const std::string& html, int duration_ms) {
+    if (slot < 0 || slot >= ABSOLUTE_PLAYER_LIMIT || html.size() > 2048 ||
+        (!html.empty() && (duration_ms <= 0 || duration_ms > 120000))) {
+        error_ = "invalid menu recipient, text length or duration";
         return KEEL_RESULT_INVALID_ARGUMENT;
     }
     if (!messages_ || !events_ || !manager) {
@@ -24,8 +25,8 @@ KeelResult Cs2MenuBackend::Render(IGameEventManager2* manager, int slot, const s
     try {
         event = manager->CreateEvent("show_survival_respawn_status", true);
         if (!event) throw std::runtime_error("CS2 menu game event is unavailable");
-        event->SetString("loc_token", html.c_str());
-        event->SetInt("duration", html.empty() ? 0 : 1);
+        event->SetString("loc_token", html.empty() ? " " : html.c_str());
+        event->SetInt("duration", html.empty() ? 0 : (duration_ms + 999) / 1000);
         event->SetPlayer("userid", CPlayerSlot(slot));
         definition = messages_->FindNetworkMessageById(GE_Source1LegacyGameEvent);
         if (!definition) throw std::runtime_error("legacy game-event network message unavailable");

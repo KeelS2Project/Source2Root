@@ -35,7 +35,7 @@ KeelResult Foundation::OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerCo
     const auto id = next_session_++;
     auto [it, inserted] = native_displays_.emplace(player.slot, NativeDisplay{id, owner, player,
         std::move(menu), spec.provider_service, spec.provider_version, spec.selected, spec.user_data,
-        now_ + std::chrono::milliseconds(spec.timeout_milliseconds), now_ + std::chrono::milliseconds(250)});
+        now_ + std::chrono::milliseconds(spec.timeout_milliseconds)});
     if (acquired) {
         result = host_.AcquireProvider(spec.provider_service, spec.provider_version);
         if (result != KEEL_RESULT_OK) {
@@ -43,7 +43,7 @@ KeelResult Foundation::OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerCo
             return result;
         }
     }
-    result = host_.RenderMenu(player, it->second.menu.Html());
+    result = host_.RenderMenu(player, it->second.menu.Html(), static_cast<int>(spec.timeout_milliseconds));
     if (result != KEEL_RESULT_OK) {
         it->second.cleared = true;
         CloseNativeDisplay(player.slot);
@@ -114,7 +114,11 @@ bool Foundation::NativeMenuInput(const Player& player, std::uint64_t session, sr
     switch (display.menu.Input(input)) {
     case MenuAction::Cancelled: return CloseNativeDisplay(player.slot);
     case MenuAction::Selected: return CloseNativeDisplay(player.slot, static_cast<int>(display.menu.selected));
-    case MenuAction::Changed: return host_.RenderMenu(current, display.menu.Html()) == KEEL_RESULT_OK;
+    case MenuAction::Changed:
+        if (host_.RenderMenu(current, display.menu.Html(),
+            static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(display.expires - now_).count())) == KEEL_RESULT_OK) return true;
+        if (CurrentMenu(player) == session) CloseNativeDisplay(player.slot);
+        return false;
     default: return false;
     }
 }
@@ -131,9 +135,6 @@ void Foundation::TickNativeMenus() {
         if (result == KEEL_RESULT_NOT_FOUND || (result == KEEL_RESULT_OK && !current.SameConnection(display.player))) {
             display.cleared = true;
             CloseNativeDisplay(slot);
-        } else if (result == KEEL_RESULT_OK && display.redraw <= now_) {
-            if (host_.RenderMenu(current, display.menu.Html()) != KEEL_RESULT_OK) host_.Log("native menu redraw failed");
-            display.redraw = now_ + std::chrono::milliseconds(250);
         }
     }
 }

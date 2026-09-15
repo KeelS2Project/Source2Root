@@ -160,29 +160,37 @@ int main(int argc, char** argv) {
         using SetPlayerMethod = void (IGameEvent::*)(const GameEventKeySymbol_t&, CPlayerSlot);
         Install<static_cast<SetPlayerMethod>(&IGameEvent::SetPlayer)>(event_table, &EventPlayer);
         auto* native = reinterpret_cast<IGameEventManager2*>(&manager);
-        Check(backend.Render(nullptr, 3, "menu") == KEEL_RESULT_NOT_READY, "missing native manager refused");
+        Check(backend.Render(nullptr, 3, "menu", 15000) == KEEL_RESULT_NOT_READY, "missing native manager refused");
         const std::string html = "<font color='#FFF'>Menu 100% &amp; text</font>";
-        Check(backend.Render(native, 3, html) == KEEL_RESULT_OK && decoded->ParseFromString(wire), "render and decode wire payload");
+        Check(backend.Render(native, 3, html, 15000) == KEEL_RESULT_OK && decoded->ParseFromString(wire), "render and decode wire payload");
         Check(Int(*decoded, "eventid") == 413 && Text(*decoded, "event_name") == "show_survival_respawn_status" &&
-              Int(Key(*decoded, 2), "val_long") == 1 && Text(Key(*decoded, 1), "val_string") == html &&
+              Int(Key(*decoded, 2), "val_long") == 15 && Text(Key(*decoded, 1), "val_string") == html &&
               Int(Key(*decoded, 0), "val_long") == 3 &&
               Int(Key(*decoded, 3), "val_long") == 10003, "wire uses engine key order, types and pawn identity without an advertisement");
         Check(recipients[0] == 8, "private menu targets only slot 3");
         for (std::size_t i = 1; i < recipients.size(); ++i) Check(recipients[i] == 0, "no high-slot broadcast");
-        Check(backend.Render(native, 3, "") == KEEL_RESULT_OK && decoded->ParseFromString(wire) &&
-              Int(Key(*decoded, 2), "val_long") == 0 && Text(Key(*decoded, 1), "val_string").empty(), "clear expires visible menu");
+        Check(backend.Render(native, 3, "", 0) == KEEL_RESULT_OK && decoded->ParseFromString(wire) &&
+              Int(Key(*decoded, 2), "val_long") == 0 && Text(Key(*decoded, 1), "val_string") == " ", "clear preserves a nonempty token so the client hide path runs");
+        for (const auto milliseconds : {1, 250, 999, 1000, 1001, 119999, 120000}) {
+            Check(backend.Render(native, 3, html, milliseconds) == KEEL_RESULT_OK && decoded->ParseFromString(wire) &&
+                  Int(Key(*decoded, 2), "val_long") == (milliseconds + 999) / 1000, "packet lifetime rounds up to whole seconds");
+        }
+        const auto before_invalid = creations;
+        for (const auto milliseconds : {-1, 0, 120001, INT32_MAX})
+            Check(backend.Render(native, 3, html, milliseconds) == KEEL_RESULT_INVALID_ARGUMENT, "invalid lifetime rejected before engine access");
+        Check(creations == before_invalid, "invalid lifetime cannot allocate a native event");
         const int last = ABSOLUTE_PLAYER_LIMIT - 1;
-        Check(backend.Render(native, last, html) == KEEL_RESULT_OK &&
+        Check(backend.Render(native, last, html, 15000) == KEEL_RESULT_OK &&
               recipients[static_cast<unsigned>(last) / 64] == (uint64{1} << (last % 64)), "recipient mask reaches last slot");
         for (mode = 1; mode <= 12; ++mode) {
-            Check(backend.Render(native, 3, html) == KEEL_RESULT_ENGINE_FAILURE, "engine failures reported");
+            Check(backend.Render(native, 3, html, 15000) == KEEL_RESULT_ENGINE_FAILURE, "engine failures reported");
             Check(allocations == releases && creations == frees, "event and message resources released on every failure");
         }
         mode = 0;
-        Check(backend.Render(native, -1, html) == KEEL_RESULT_INVALID_ARGUMENT &&
-              backend.Render(native, 3, std::string(2049, 'x')) == KEEL_RESULT_INVALID_ARGUMENT, "renderer bounds");
+        Check(backend.Render(native, -1, html, 15000) == KEEL_RESULT_INVALID_ARGUMENT &&
+              backend.Render(native, 3, std::string(2049, 'x'), 15000) == KEEL_RESULT_INVALID_ARGUMENT, "renderer bounds");
         event_id = 614;
-        Check(backend.Render(native, 3, html) == KEEL_RESULT_OK && decoded->ParseFromString(wire) &&
+        Check(backend.Render(native, 3, html, 15000) == KEEL_RESULT_OK && decoded->ParseFromString(wire) &&
               Int(*decoded, "eventid") == 614 && backend.Error().empty(), "engine descriptor changes and recovery need no advertisement");
         Check(allocations == releases && creations == frees, "balanced native resource lifetimes");
         std::cout << "native menu serialization, typed player identity, recipients, clear and failure cleanup passed\n";

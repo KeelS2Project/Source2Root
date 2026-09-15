@@ -49,7 +49,7 @@ public:
     KeelResult RemoveCommand(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult ListenEvent(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult RemoveEvent(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RenderMenu(const sr::Player&, const std::string&) override { return KEEL_RESULT_OK; }
+    KeelResult RenderMenu(const sr::Player&, const std::string&, int) override { return KEEL_RESULT_OK; }
     KeelResult AcquireProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     KeelResult ReleaseProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     void Clear() { messages.clear(); attempts.clear(); logs.clear(); enumeration_calls = 0; }

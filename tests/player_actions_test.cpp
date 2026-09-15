@@ -47,7 +47,7 @@ public:
     KeelResult RemoveCommand(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult ListenEvent(const std::string&) override { return KEEL_RESULT_OK; }
     KeelResult RemoveEvent(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RenderMenu(const sr::Player&, const std::string& html) override { menu = html; if (on_render) on_render(); return KEEL_RESULT_OK; }
+    KeelResult RenderMenu(const sr::Player&, const std::string& html, int) override { menu = html; if (on_render) on_render(); return KEEL_RESULT_OK; }
     KeelResult AcquireProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     KeelResult ReleaseProvider(const std::string&, unsigned) override { return KEEL_RESULT_UNSUPPORTED; }
     std::string Text(int slot) const {

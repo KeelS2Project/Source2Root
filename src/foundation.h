@@ -41,7 +41,7 @@ public:
     virtual KeelResult RemoveCommand(const std::string& name) = 0;
     virtual KeelResult ListenEvent(const std::string& name) = 0;
     virtual KeelResult RemoveEvent(const std::string& name) = 0;
-    virtual KeelResult RenderMenu(const Player& player, const std::string& html) = 0;
+    virtual KeelResult RenderMenu(const Player& player, const std::string& html, int duration_ms = 0) = 0;
     virtual KeelResult ReadPlayerInput(const Player&, KeelPlayerInput& input) {
         input = {sizeof(input), 0, 0, 0}; return KEEL_RESULT_UNSUPPORTED;
     }
@@ -159,7 +159,7 @@ private:
         Cell menu;
         Cell player_handle;
         Player player;
-        Clock::time_point expires, redraw;
+        Clock::time_point expires;
         MenuControls controls;
     };
     struct Provider {
@@ -178,7 +178,7 @@ private:
         unsigned version;
         SrMenuCallback callback;
         void* user_data;
-        Clock::time_point expires, redraw;
+        Clock::time_point expires;
         bool active = false, closing = false, cleared = false;
         MenuControls controls;
     };
