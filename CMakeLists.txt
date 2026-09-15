@@ -205,6 +205,12 @@ if(BUILD_TESTING)
             "${CMAKE_BINARY_DIR}/test-fixtures/modules" "menu" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb"
             $<TARGET_FILE:source2root_random> "${CMAKE_BINARY_DIR}/scripts/roll.smx" "${CMAKE_SOURCE_DIR}/examples/roll/plugin.json")
         set_tests_properties(native_modules PROPERTIES TIMEOUT 30)
+        add_test(NAME native_late_load COMMAND sr_module_integration
+            "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
+            $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:sr_example>
+            "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/hello.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+            "${CMAKE_BINARY_DIR}/test-fixtures/late-modules" "late" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
+        set_tests_properties(native_late_load PROPERTIES TIMEOUT 30)
     endif()
     set(SR_EVENT_DESCRIPTORS "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures")

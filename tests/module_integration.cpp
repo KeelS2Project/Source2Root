@@ -167,6 +167,33 @@ int main(int argc, char** argv) {
             return 0;
         }
         Check(contains("SR_ExampleAdd registered"), "real example module registration");
+        if (argc == 12 && std::string(argv[10]) == "late") {
+            const auto registrations = count();
+            run("sr plugins unload hello");
+            run("keel plugins unload 2");
+            run("keel plugins unload 1");
+            Check(count() == 1 && cvars() == 0, "late-load fixture starts with only the host command");
+            for (const auto* operation : {"load", "reload"}) {
+                run(std::string("keel plugins ") + operation + " source2root" + extension);
+                run("keel plugins load sr_example" + extension);
+                frame();
+                const auto before = std::string(messages()).size();
+                run("sr plugins list");
+                Check(std::string(messages()).substr(before).find("hello                 running") != std::string::npos,
+                      "late-loaded and reloaded native core discovers enabled scripts on its first frame");
+                const auto replies = std::string(chat()).size();
+                Check(command("sr_hello", 3) && std::string(chat()).size() > replies,
+                      "automatically restored script can call its native provider");
+                frame();
+                Check(count() == registrations, "later frames do not duplicate script registrations");
+                run("sr plugins unload hello");
+                run("keel plugins unload 2");
+            }
+            Check(stop(), "late-load fixture stops without retained resources");
+            Check(network_stop(), "late-load fixture releases native message allocations");
+            std::cout << "late native loading and reload discovery passed\n";
+            return 0;
+        }
         run("sr");
         run("sr help plugins");
         Check(contains("Source2Root Menu:") && contains("Usage: sr plugins <command>"), "approved management menus are real commands");

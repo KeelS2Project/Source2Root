@@ -61,6 +61,7 @@ public:
             try { settings = sr::CoreSettings::Read(root_.parent_path().parent_path() / "cfg/source2root/source2root.cfg", settings); }
             catch (const std::exception& error) { Log("Could not read source2root.cfg: " + std::string(error.what()) + ". Using defaults."); }
             foundation_ = std::make_unique<sr::Foundation>(*this, runtime, root_, settings);
+            scripts_started_ = false;
             CreateCoreSettings(settings);
             api_ = {sizeof(api_), SR_EXTENSION_API_VERSION, this, &RegisterNative, &UnregisterNative, &OpenMenu, &CloseMenu};
             if (services_.Publish(SR_EXTENSION_SERVICE, SR_EXTENSION_API_VERSION, &api_, publication_) != KEEL_RESULT_OK)
@@ -99,17 +100,10 @@ public:
     }
     void Unload() override { foundation_.reset(); menu_.reset(); game_event_manager_ = nullptr; core_settings_.clear(); restart_ = 0; convars_ = nullptr; player_input_ = nullptr; }
     void OnAllPluginsLoaded() override {
-        if (!foundation_) return;
-        foundation_->Discover();
-        const auto scripts = foundation_->Status();
-        const auto loaded = std::count_if(scripts.begin(), scripts.end(), [](const auto& script) {
-            return script.state == sr::PluginState::Running;
-        });
-        const auto extensions = foundation_->ExtensionCount();
-        Log("Version 1.0.0. Loaded " + std::to_string(loaded) + (loaded == 1 ? " plugin and " : " plugins and ") +
-            std::to_string(extensions) + (extensions == 1 ? " extension." : " extensions."));
+        StartScripts();
     }
     void OnGameFrame(bool, bool, bool) override {
+        StartScripts();
         if (foundation_) foundation_->Tick(sr::Foundation::Clock::now());
     }
     void OnPluginResumed(const PluginSnapshot& plugin) override {
@@ -368,6 +362,18 @@ public:
         return services_.Release(service.c_str(), version);
     }
 private:
+    void StartScripts() {
+        if (!foundation_ || scripts_started_) return;
+        scripts_started_ = true;
+        foundation_->Discover();
+        const auto scripts = foundation_->Status();
+        const auto loaded = std::count_if(scripts.begin(), scripts.end(), [](const auto& script) {
+            return script.state == sr::PluginState::Running;
+        });
+        const auto extensions = foundation_->ExtensionCount();
+        Log("Version 1.0.0. Loaded " + std::to_string(loaded) + (loaded == 1 ? " plugin and " : " plugins and ") +
+            std::to_string(extensions) + (extensions == 1 ? " extension." : " extensions."));
+    }
     const KeelPlayerInputApi* player_input_ = nullptr;
     std::map<int, std::pair<std::uint64_t, KeelResult>> input_errors_;
     Action Listening(HookCall<bool>& call, CPlayerSlot receiver, CPlayerSlot sender, bool& listening) {
@@ -395,6 +401,7 @@ private:
     }
     std::filesystem::path root_;
     std::unique_ptr<sr::Foundation> foundation_;
+    bool scripts_started_ = false;
     std::unique_ptr<sr::Cs2MenuBackend> menu_;
     IGameEventManager2* game_event_manager_ = nullptr;
     keels2::services::Service services_;
