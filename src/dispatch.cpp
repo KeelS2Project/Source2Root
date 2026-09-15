@@ -246,6 +246,7 @@ bool Foundation::MenuInput(const Player& player, std::uint64_t session, sr::Menu
     if (display.script->state != PluginState::Running || display.expires <= now_) { CloseDisplay(player.slot); return false; }
     auto& menu = std::get<ScriptMenu>(handles_.Get(display.menu, display.script->owner, MenuType));
     if (!Allowed(*display.script, display.player_handle, menu.menu.permission)) { CloseDisplay(player.slot); return false; }
+    found->second.expires = display.expires = now_ + display.timeout;
     const auto action = menu.menu.Input(input);
     if (action == MenuAction::Cancelled) return CloseDisplay(player.slot);
     if (action == MenuAction::Selected) {

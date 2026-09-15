@@ -22,7 +22,7 @@ public void Selected(Player caller, int value)
     {
         Menu menu = CreateMenu("Submenu test", "test.menu", Selected);
         AddMenuItem(menu, "Confirm", true, 20);
-        ShowMenu(menu, caller, 10000);
+        ShowMenu(menu, caller);
     }
     else
     {

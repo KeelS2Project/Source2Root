@@ -160,6 +160,7 @@ private:
         Cell player_handle;
         Player player;
         Clock::time_point expires;
+        std::chrono::milliseconds timeout;
         MenuControls controls;
     };
     struct Provider {
@@ -179,6 +180,7 @@ private:
         SrMenuCallback callback;
         void* user_data;
         Clock::time_point expires;
+        std::chrono::milliseconds timeout;
         bool active = false, closing = false, cleared = false;
         MenuControls controls;
     };

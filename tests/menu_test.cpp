@@ -13,10 +13,21 @@ static void Require(bool value, const char* message) {
 int main() {
     sr::Menu menu{"<test>", "demo.hello", {{"first"}, {"disabled", false}, {"third"}, {"fourth"}, {"fifth"}}};
     Require(menu.Html().find("&lt;test&gt;") != std::string::npos, "escape title");
+    const auto first_page = menu.Html();
+    Require(first_page.find("first") != std::string::npos && first_page.find("third") != std::string::npos &&
+        first_page.find("fourth") == std::string::npos && first_page.find("fifth") == std::string::npos,
+        "three choices fit each page without hiding later choices");
+    std::size_t line_breaks = 0;
+    for (auto offset = first_page.find("<br>"); offset != std::string::npos; offset = first_page.find("<br>", offset + 4))
+        ++line_breaks;
+    Require(line_breaks == 5 && first_page.find("Page 1/2") < first_page.find("<br>"),
+        "full page has six logical lines with page number in the title");
     Require(menu.Input(sr::MenuInput::Down) == sr::MenuAction::Changed, "navigate");
     Require(menu.Input(sr::MenuInput::Select) == sr::MenuAction::None, "disabled selection");
     for (int i = 0; i < 3; ++i) menu.Input(sr::MenuInput::Down);
     Require(menu.Html().find("Page 2/2") != std::string::npos, "pagination");
+    Require(menu.Html().find("fourth") != std::string::npos && menu.Html().find("fifth") != std::string::npos &&
+        menu.Html().find("third") == std::string::npos, "remaining choices appear on second page");
     Require(menu.Input(sr::MenuInput::Select) == sr::MenuAction::Selected, "select second page");
     Require(menu.Input(sr::MenuInput::Back) == sr::MenuAction::Changed && menu.selected == 0, "back page");
     Require(menu.Input(sr::MenuInput::Back) == sr::MenuAction::Cancelled, "cancel");

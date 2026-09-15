@@ -428,7 +428,7 @@ int main(int argc, char** argv) {
         if (argc >= 12) {
             input_state(KEELS2_BUTTON_USE, 1, KEEL_RESULT_OK);
             Check(command("sr_hello", 3), "client opens actual module menu");
-            Check(std::string(menu_text()).find("Forward/Back: navigate") != std::string::npos, "module renders action hints through native serialization without an advertisement");
+            Check(std::string(menu_text()).find("Forward/Back: move") != std::string::npos, "module renders action hints through native serialization without an advertisement");
             const auto selected = [&] { return occurrences(chat(), "The menu selection ran in SourcePawn."); };
             const auto before_selection = selected();
             frame(); frame();

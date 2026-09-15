@@ -35,7 +35,7 @@ KeelResult Foundation::OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerCo
     const auto id = next_session_++;
     auto [it, inserted] = native_displays_.emplace(player.slot, NativeDisplay{id, owner, player,
         std::move(menu), spec.provider_service, spec.provider_version, spec.selected, spec.user_data,
-        now_ + std::chrono::milliseconds(spec.timeout_milliseconds)});
+        now_ + std::chrono::milliseconds(spec.timeout_milliseconds), std::chrono::milliseconds(spec.timeout_milliseconds)});
     if (acquired) {
         result = host_.AcquireProvider(spec.provider_service, spec.provider_version);
         if (result != KEEL_RESULT_OK) {
@@ -111,6 +111,7 @@ bool Foundation::NativeMenuInput(const Player& player, std::uint64_t session, sr
         CloseNativeDisplay(player.slot);
         return false;
     }
+    display.expires = now_ + display.timeout;
     switch (display.menu.Input(input)) {
     case MenuAction::Cancelled: return CloseNativeDisplay(player.slot);
     case MenuAction::Selected: return CloseNativeDisplay(player.slot, static_cast<int>(display.menu.selected));

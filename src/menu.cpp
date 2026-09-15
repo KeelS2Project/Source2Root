@@ -31,9 +31,9 @@ MenuAction Menu::Input(MenuInput input) {
     if (input == MenuInput::Select)
         return items[selected].enabled ? MenuAction::Selected : MenuAction::None;
     if (input == MenuInput::Back) {
-        if (selected / 4 == 0)
+        if (selected / ItemsPerPage == 0)
             return MenuAction::Cancelled;
-        selected = (selected / 4 - 1) * 4;
+        selected = (selected / ItemsPerPage - 1) * ItemsPerPage;
     } else if (input == MenuInput::Up) {
         selected = selected == 0 ? items.size() - 1 : selected - 1;
     } else {
@@ -58,18 +58,18 @@ std::string Menu::Escape(const std::string& text) {
 }
 
 std::string Menu::Html() const {
-    std::string html = "<font color='#78DCC8'>" + Escape(title) + "</font><br>";
-    const auto page = selected / 4;
-    for (std::size_t i = page * 4; i < std::min(items.size(), page * 4 + 4); ++i) {
+    const auto page = selected / ItemsPerPage;
+    const auto pages = std::max(std::size_t{1}, (items.size() + ItemsPerPage - 1) / ItemsPerPage);
+    std::string html = "<font color='#78DCC8'>" + Escape(title) + " | Page " +
+        std::to_string(page + 1) + "/" + std::to_string(pages) + "</font><br>";
+    for (std::size_t i = page * ItemsPerPage; i < std::min(items.size(), page * ItemsPerPage + ItemsPerPage); ++i) {
         html += "<font color='";
         html += !items[i].enabled ? "#777777" : i == selected ? "#FFFF88" : "#FFFFFF";
         html += "'>";
         html += i == selected ? "&gt; " : "  ";
         html += Escape(items[i].text) + "</font><br>";
     }
-    html += "<font color='#BBBBBB'>Forward/Back: navigate | Use: select<br>Reload: back/close | Movement stays active<br>Page ";
-    html += std::to_string(page + 1) + "/" + std::to_string(std::max(std::size_t{1}, (items.size() + 3) / 4));
-    return html + "</font>";
+    return html + "<font color='#BBBBBB'>Forward/Back: move | Use: select<br>Reload: back/close</font>";
 }
 
 }

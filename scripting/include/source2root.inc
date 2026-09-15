@@ -75,7 +75,7 @@ native bool GetLastError(char[] output, int capacity);
 native bool GetDataPath(char[] output, int capacity);
 native Menu CreateMenu(const char[] title, const char[] permission, MenuCallback callback);
 native bool AddMenuItem(Menu menu, const char[] text, bool enabled = true, int value = -1);
-native bool ShowMenu(Menu menu, Player player, int timeoutMilliseconds = 15000);
+native bool ShowMenu(Menu menu, Player player, int timeoutMilliseconds = 20000);
 native bool CloseMenu(Menu menu);
 native ConVar CreateIntConVar(const char[] name, int defaultValue, const char[] description = "",
     int minimum = (-2147483647 - 1), int maximum = 2147483647);

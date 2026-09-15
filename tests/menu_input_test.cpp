@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     const auto open = [&](int slot = 3) {
         app.Dispatch(sr::Origin::ClientConsole, slot, "sr_inputmenu");
         Require(app.CurrentMenu(host.players.at(slot)) != 0, "script menu opened");
-        Require(host.menus.at(slot).find("Forward/Back: navigate") != std::string::npos &&
+        Require(host.menus.at(slot).find("Forward/Back: move") != std::string::npos &&
             host.menus.at(slot).find("Use: select") != std::string::npos && host.menus.at(slot).find("Reload: back/close") != std::string::npos,
             "menu explains actual action controls");
     };
@@ -108,11 +108,20 @@ int main(int argc, char** argv) {
     Require(host.renders == renders + 80 && host.durations.at(3) == 8720 && app.CurrentMenu(host.players.at(3)),
         "idle script menu refreshes every frame without extending its lifetime");
     press(KEELS2_BUTTON_BACK);
-    Require(host.renders == renders + 83 && host.durations.at(3) == 8688,
-        "script navigation updates the selection with remaining lifetime");
+    Require(host.renders == renders + 83 && host.durations.at(3) == 10000,
+        "fresh script navigation restarts the requested inactivity timeout");
     now += std::chrono::milliseconds(8688); app.Tick(now);
+    Require(app.CurrentMenu(host.players.at(3)) && host.durations.at(3) == 1312,
+        "held navigation does not renew script timeout; menu survives its original deadline");
+    press(KEELS2_BUTTON_ATTACK | KEELS2_BUTTON_JUMP);
+    Require(host.durations.at(3) == 1280, "unrelated gameplay input does not renew script timeout");
+    now += std::chrono::milliseconds(1279); app.Tick(now);
+    Require(app.CurrentMenu(host.players.at(3)) && host.durations.at(3) == 1,
+        "script menu remains available until the inactivity deadline");
+    host.input[3].buttons = KEELS2_BUTTON_USE;
+    now += std::chrono::milliseconds(1); app.Tick(now);
     Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && host.durations.at(3) == 0,
-        "selection does not extend script expiry and expiry clears the display");
+        "script expiry clears the display before late input can revive it");
     host.input[3].buttons = KEELS2_BUTTON_USE;
     open(); const auto first = app.CurrentMenu(host.players.at(3));
     tick(); tick();
@@ -120,6 +129,7 @@ int main(int argc, char** argv) {
     press(KEELS2_BUTTON_USE);
     const auto submenu = app.CurrentMenu(host.players.at(3));
     Require(submenu != first && submenu && host.menus.at(3).find("Submenu test") != std::string::npos, "key selects real SourcePawn submenu");
+    Require(host.durations.at(3) == 20000, "script default is twenty seconds of inactivity");
     for (int i = 0; i < 40; ++i) tick();
     Require(app.CurrentMenu(host.players.at(3)) == submenu && host.replies.empty(), "held select cannot cascade or repeat");
     press(KEELS2_BUTTON_USE);
@@ -217,11 +227,20 @@ int main(int argc, char** argv) {
     Require(host.renders == renders + 80 && host.durations.at(3) == 8720 && app.CurrentMenu(host.players.at(3)),
         "idle native menu refreshes every frame without extending its lifetime");
     press(KEELS2_BUTTON_BACK);
-    Require(host.renders == renders + 83 && host.durations.at(3) == 8688,
-        "native navigation uses remaining lifetime");
+    Require(host.renders == renders + 83 && host.durations.at(3) == 10000,
+        "fresh native navigation restarts the requested inactivity timeout");
     now += std::chrono::milliseconds(8688); app.Tick(now);
+    Require(app.CurrentMenu(host.players.at(3)) && host.durations.at(3) == 1312,
+        "held navigation does not renew native timeout; menu survives its original deadline");
+    press(KEELS2_BUTTON_ATTACK | KEELS2_BUTTON_JUMP);
+    Require(host.durations.at(3) == 1280, "unrelated gameplay input does not renew native timeout");
+    now += std::chrono::milliseconds(1279); app.Tick(now);
+    Require(app.CurrentMenu(host.players.at(3)) && host.durations.at(3) == 1,
+        "native menu remains available until the inactivity deadline");
+    host.input[3].buttons = KEELS2_BUTTON_USE;
+    now += std::chrono::milliseconds(1); app.Tick(now);
     Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && host.durations.at(3) == 0 && !host.leases,
-        "native expiry is unchanged by navigation and releases display and provider");
+        "native expiry clears the display before late input can revive it");
     host.input[3].buttons = 0;
     native_open(3, native); const auto peer_session = native_open(4, peer);
     Require(host.leases == 1, "native menus share one provider lease");

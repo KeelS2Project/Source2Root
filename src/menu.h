@@ -27,6 +27,7 @@ private:
 
 class Menu {
 public:
+    static constexpr std::size_t ItemsPerPage = 3;
     std::string title;
     std::string permission;
     std::vector<MenuItem> items;

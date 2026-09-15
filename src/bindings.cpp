@@ -213,7 +213,7 @@ void Foundation::Bind(Script& script) {
         }
         const auto session = next_session_++;
         displays_.emplace(player.slot, Display{session, &script, args.Int(1), args.Int(2), player,
-            now_ + std::chrono::milliseconds(args.Int(3)), {}});
+            now_ + std::chrono::milliseconds(args.Int(3)), std::chrono::milliseconds(args.Int(3)), {}});
         const auto controls = InitialMenuControls(player);
         if (auto found = displays_.find(player.slot); found != displays_.end() && found->second.session == session)
             found->second.controls = controls;
