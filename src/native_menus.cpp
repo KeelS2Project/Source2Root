@@ -135,7 +135,13 @@ void Foundation::TickNativeMenus() {
         if (result == KEEL_RESULT_NOT_FOUND || (result == KEEL_RESULT_OK && !current.SameConnection(display.player))) {
             display.cleared = true;
             CloseNativeDisplay(slot);
+            continue;
         }
+        if (result != KEEL_RESULT_OK) continue;
+        if (!permissions_.Allows(current, display.menu.permission) ||
+            host_.RenderMenu(current, display.menu.Html(),
+                static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(display.expires - now_).count())) != KEEL_RESULT_OK)
+            CloseNativeDisplay(slot);
     }
 }
 

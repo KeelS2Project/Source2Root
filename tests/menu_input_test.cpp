@@ -105,10 +105,11 @@ int main(int argc, char** argv) {
     Require(host.durations.at(3) == 10000, "script initial packet uses requested lifetime");
     auto renders = host.renders;
     for (int i = 0; i < 80; ++i) tick();
-    Require(host.renders == renders && app.CurrentMenu(host.players.at(3)), "idle script menu does not replay display events");
+    Require(host.renders == renders + 80 && host.durations.at(3) == 8720 && app.CurrentMenu(host.players.at(3)),
+        "idle script menu refreshes every frame without extending its lifetime");
     press(KEELS2_BUTTON_BACK);
-    Require(host.renders == renders + 1 && host.durations.at(3) == 8688,
-        "script selection sends one update with remaining lifetime");
+    Require(host.renders == renders + 83 && host.durations.at(3) == 8688,
+        "script navigation updates the selection with remaining lifetime");
     now += std::chrono::milliseconds(8688); app.Tick(now);
     Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && host.durations.at(3) == 0,
         "selection does not extend script expiry and expiry clears the display");
@@ -188,10 +189,13 @@ int main(int argc, char** argv) {
 
     host.input[3].buttons = 0; open();
     host.fail_render = host.fail_clear = true;
-    press(KEELS2_BUTTON_BACK);
+    tick();
+    host.fail_render = false;
+    renders = host.renders;
     press(KEELS2_BUTTON_USE);
-    Require(host.replies.empty(), "failed script update and clear cannot execute an unseen selection");
-    host.fail_render = host.fail_clear = false; tick();
+    Require(host.renders == renders && host.replies.empty(),
+        "failed idle script refresh waits for cleanup without redrawing or executing a selection");
+    host.fail_clear = false; tick();
     Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty(), "failed script update retries cleanup after transport recovery");
 
     NativeAction native, peer;
@@ -210,9 +214,10 @@ int main(int argc, char** argv) {
     Require(host.durations.at(3) == 10000, "native initial packet uses requested lifetime");
     renders = host.renders;
     for (int i = 0; i < 80; ++i) tick();
-    Require(host.renders == renders && app.CurrentMenu(host.players.at(3)), "idle native menu does not replay display events");
+    Require(host.renders == renders + 80 && host.durations.at(3) == 8720 && app.CurrentMenu(host.players.at(3)),
+        "idle native menu refreshes every frame without extending its lifetime");
     press(KEELS2_BUTTON_BACK);
-    Require(host.renders == renders + 1 && host.durations.at(3) == 8688,
+    Require(host.renders == renders + 83 && host.durations.at(3) == 8688,
         "native navigation uses remaining lifetime");
     now += std::chrono::milliseconds(8688); app.Tick(now);
     Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && host.durations.at(3) == 0 && !host.leases,
@@ -246,10 +251,13 @@ int main(int argc, char** argv) {
     Require(!app.CurrentMenu(host.players.at(3)), "resume cannot revive old native menu input");
     host.input[3].buttons = 0; native_open(3, native);
     host.fail_render = host.fail_clear = true;
-    press(KEELS2_BUTTON_BACK);
+    tick();
+    host.fail_render = false;
+    renders = host.renders;
     press(KEELS2_BUTTON_USE);
-    Require(native.calls == 1 && host.leases == 1, "failed native update and clear retain cleanup without invoking a selection");
-    host.fail_render = host.fail_clear = false; tick();
+    Require(host.renders == renders && native.calls == 1 && host.leases == 1,
+        "failed idle native refresh retains cleanup and provider without redrawing or selecting");
+    host.fail_clear = false; tick();
     Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty() && !host.leases, "native update failure retries cleanup after transport recovery");
     Require(app.Shutdown(), "clean input shutdown");
     const auto reads = host.input_reads; tick();

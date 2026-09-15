@@ -142,6 +142,14 @@ void Foundation::Tick(Clock::time_point now) {
             handles_.Remove(display.menu, display.script->owner, MenuType);
             displays_.erase(slot); continue;
         }
+        if (result != KEEL_RESULT_OK) continue;
+        const auto& menu = std::get<ScriptMenu>(handles_.Get(display.menu, display.script->owner, MenuType));
+        if (!permissions_.Allows(current, menu.menu.permission) ||
+            host_.RenderMenu(current, menu.menu.Html(),
+                static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(display.expires - now_).count())) != KEEL_RESULT_OK) {
+            display.expires = now_;
+            CloseDisplay(slot);
+        }
     }
     PollMenuInput();
 }
