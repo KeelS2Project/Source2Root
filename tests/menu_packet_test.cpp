@@ -36,8 +36,9 @@ void Install(std::array<void*, 128>& table, Function function) {
     std::memcpy(&table[*index], &function, sizeof(function));
 }
 void* AsProto(const Packet* packet) { return mode == 3 ? nullptr : mode == 11 ? wrong_proto : packet->proto; }
-INetworkMessageInternal* Find(void*, const char* name) {
-    Check(std::strcmp(name, "CMsgSource1LegacyGameEvent") == 0, "exact event message lookup required");
+INetworkMessageInternal* FindName(void*, const char*) { return nullptr; }
+INetworkMessageInternal* Find(void*, int id) {
+    Check(id == GE_Source1LegacyGameEvent, "SDK legacy event message identifier required");
     return mode == 1 ? nullptr : reinterpret_cast<INetworkMessageInternal*>(&definition);
 }
 CNetMessage* Allocate(void*) {
@@ -143,7 +144,8 @@ int main(int argc, char** argv) {
         outgoing.proto = event.get();
         wrong_proto = list.get();
         Install<&CNetMessage::AsProto>(message_table, &AsProto);
-        Install<&INetworkMessages::FindNetworkMessage>(messages_table, &Find);
+        Install<&INetworkMessages::FindNetworkMessage>(messages_table, &FindName);
+        Install<&INetworkMessages::FindNetworkMessageById>(messages_table, &Find);
         Install<&INetworkMessages::DeallocateNetMessageAbstract>(messages_table, &Release);
         Install<&INetworkMessageInternal::AllocateMessage>(definition_table, &Allocate);
         using PostMethod = void (IGameEventSystem::*)(CSplitScreenSlot, bool, int, const uint64*,

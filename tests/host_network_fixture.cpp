@@ -45,8 +45,9 @@ void Install(std::array<void*, 128>& table, Function function) {
     std::memcpy(&table[*slot], &function, sizeof(function));
 }
 void* AsProto(const Packet* packet) { return packet->proto; }
-INetworkMessageInternal* Find(void*, const char* name) {
-    Check(name && std::strcmp(name, "CMsgSource1LegacyGameEvent") == 0);
+INetworkMessageInternal* FindName(void*, const char*) { return nullptr; }
+INetworkMessageInternal* Find(void*, int id) {
+    Check(id == GE_Source1LegacyGameEvent);
     return reinterpret_cast<INetworkMessageInternal*>(&network->definition);
 }
 CNetMessage* Allocate(void*) {
@@ -131,7 +132,8 @@ extern "C" bool SrNetworkInitialize(const char* path) {
         };
         network->output = create("CMsgSource1LegacyGameEvent");
         Install<&CNetMessage::AsProto>(network->packet_table, &AsProto);
-        Install<&INetworkMessages::FindNetworkMessage>(network->messages_table, &Find);
+        Install<&INetworkMessages::FindNetworkMessage>(network->messages_table, &FindName);
+        Install<&INetworkMessages::FindNetworkMessageById>(network->messages_table, &Find);
         Install<&INetworkMessages::DeallocateNetMessageAbstract>(network->messages_table, &Release);
         Install<&INetworkMessageInternal::AllocateMessage>(network->definition_table, &Allocate);
         Install<static_cast<PostMethod>(&IGameEventSystem::PostEventAbstract)>(network->events_table, &Post);

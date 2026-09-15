@@ -27,7 +27,7 @@ KeelResult Cs2MenuBackend::Render(IGameEventManager2* manager, int slot, const s
         event->SetString("loc_token", html.c_str());
         event->SetInt("duration", html.empty() ? 0 : 1);
         event->SetPlayer("userid", CPlayerSlot(slot));
-        definition = messages_->FindNetworkMessage("CMsgSource1LegacyGameEvent");
+        definition = messages_->FindNetworkMessageById(GE_Source1LegacyGameEvent);
         if (!definition) throw std::runtime_error("legacy game-event network message unavailable");
         allocated = definition->AllocateMessage();
         if (!allocated) throw std::runtime_error("legacy game-event allocation failed");
