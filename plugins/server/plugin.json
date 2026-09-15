@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "server",
+  "name": "Source2Root server administration",
+  "author": "KeelS2Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "server.smx",
+  "enabled": true,
+  "dependencies": []
+}

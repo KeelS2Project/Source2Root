@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "hello",
+  "name": "Foundation example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "hello.smx",
+  "enabled": true,
+  "dependencies": []
+}

@@ -1,0 +1,58 @@
+name: foundation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build pinned dependencies and execute acceptance
+        run: python tools/build.py --configuration Release
+      - name: Package and verify extracted compiler, SDK and modules
+        run: |
+          python tools/package.py --configuration Release
+      - name: Preserve candidate packages and verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ runner.os }}-${{ github.sha }}
+          path: out/dist/*
+          if-no-files-found: error
+      - name: Preserve execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-${{ runner.os }}-${{ github.sha }}
+          path: |
+            out/build/Testing/Temporary/*.log
+            out/build/scripts/*.smx
+            out/build-keels2/Testing/Temporary/*.log
+          if-no-files-found: warn
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Execute owned native code with ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: python tools/build.py --configuration RelWithDebInfo --sanitizers

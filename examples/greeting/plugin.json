@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "greeting",
+  "name": "Configurable greeting",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "greeting.smx",
+  "enabled": true,
+  "dependencies": []
+}

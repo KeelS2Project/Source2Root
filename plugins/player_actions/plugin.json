@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "player_actions",
+  "name": "Source2Root player actions",
+  "author": "KeelS2Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "player_actions.smx",
+  "enabled": true,
+  "dependencies": []
+}

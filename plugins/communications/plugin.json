@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "communications",
+  "name": "Source2Root communications",
+  "author": "KeelS2Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "communications.smx",
+  "enabled": true,
+  "dependencies": []
+}

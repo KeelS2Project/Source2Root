@@ -1,0 +1,639 @@
+#include <keels2/player_actions.h>
+#include <keels2/player_input.h>
+#include <cmath>
+#include <keels2/bootstrap_api.h>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+
+namespace {
+bool (*during_command)(const char*, int) = nullptr;
+bool during_ok = false;
+void AttemptRetire() noexcept {
+    during_ok = during_command("sr plugins unload hello", -1) && during_command("keel plugins unload 2", -1);
+}
+class Library {
+public:
+    explicit Library(const std::filesystem::path& path) {
+#if defined(_WIN32)
+        handle = LoadLibraryW(path.c_str());
+#else
+        handle = dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+#endif
+        if (!handle) throw std::runtime_error("cannot load " + path.string()
+#if !defined(_WIN32)
+            + ": " + dlerror()
+#endif
+        );
+    }
+    ~Library() = default;
+    void Close() {
+#if defined(_WIN32)
+        FreeLibrary(handle);
+#else
+        dlclose(handle);
+#endif
+        handle = nullptr;
+    }
+    template <typename T> T Get(const char* name) {
+#if defined(_WIN32)
+        auto value = GetProcAddress(handle, name);
+#else
+        auto value = dlsym(handle, name);
+#endif
+        if (!value) throw std::runtime_error(std::string("missing export ") + name);
+        return reinterpret_cast<T>(value);
+    }
+private:
+#if defined(_WIN32)
+    HMODULE handle;
+#else
+    void* handle;
+#endif
+};
+void Check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+void Copy(const std::filesystem::path& from, const std::filesystem::path& to) {
+    std::filesystem::create_directories(to.parent_path());
+    std::filesystem::copy_file(from, to, std::filesystem::copy_options::overwrite_existing);
+}
+}
+
+int main(int argc, char** argv) {
+    try {
+        Check(argc == 10 || argc == 11 || argc == 12 || argc == 15,
+            "module_integration host adapter tier0 module extension pawn sample manifest fixture [mode descriptors [random roll roll-manifest]]");
+        const auto fixture = std::filesystem::absolute(argv[9]);
+#if defined(_WIN32)
+        const std::string platform = "win64", host_name = "keels2_host.dll", adapter_name = "keels2_game_cs2.dll";
+        const std::string pawn_name = "libsourcepawn.dll", extension = ".dll";
+#else
+        const std::string platform = "linuxsteamrt64", host_name = "libkeels2_host.so", adapter_name = "libkeels2_game_cs2.so";
+        const std::string pawn_name = "libsourcepawn.so", extension = ".so";
+#endif
+        const auto native = fixture / "addons/keels2";
+        const auto script = fixture / "addons/source2root";
+        const auto bin = native / "bin" / platform;
+        const auto plugins = native / "plugins" / platform;
+        std::filesystem::remove_all(plugins / ".runtime");
+        if (argc == 15) {
+            std::filesystem::remove(plugins / ("source2root_random" + extension));
+            std::filesystem::remove(script / "plugins/roll/plugin.json");
+            std::filesystem::remove(script / "plugins/roll/roll.smx");
+            std::filesystem::remove(script / "plugins/roll");
+        }
+        Copy(argv[1], bin / host_name);
+        Copy(argv[2], bin / adapter_name);
+        Copy(argv[3], bin / std::filesystem::path(argv[3]).filename());
+        Copy(argv[4], plugins / ("source2root" + extension));
+        Copy(argv[5], plugins / ("sr_example" + extension));
+        Copy(argv[6], script / "bin" / platform / pawn_name);
+        Copy(argv[7], script / "plugins/hello/hello.smx");
+        Copy(argv[8], script / "plugins/hello/plugin.json");
+        std::filesystem::remove(script / "logs/source2root.log");
+        std::filesystem::create_directories(script / "configs");
+        std::ofstream(script / "configs/admin_groups.cfg") << R"("Groups" { "fixture" { "immunity" "10" "permissions" { "demo.hello" "1" "demo.status" "1" "admin.kick" "1" "admin.changemap" "1" "admin.restart" "1" } } })";
+        const std::string permissions = R"("Admins" { "Fixture" { "identity" "STEAM_0:1:61" "group" "fixture" } })";
+        std::ofstream(script / "configs/admins.cfg") << permissions;
+        const auto core_cfg = fixture / "cfg/source2root/source2root.cfg";
+        std::filesystem::create_directories(core_cfg.parent_path());
+        const std::string core_values = "sr_show_activity 5\nsr_chat_public_trigger \"!\"\nsr_chat_silent_trigger \"/\"\n";
+        std::ofstream(core_cfg) << core_values;
+        Library tier0(bin / std::filesystem::path(argv[3]).filename());
+        Library adapter(bin / adapter_name);
+        Library host(bin / host_name);
+        auto network_init = adapter.Get<bool (*)(const char*)>("SrFixtureNetworkInitialize");
+        auto network_advertise = adapter.Get<void (*)()>("SrFixtureNetworkAdvertise");
+        auto menu_text = adapter.Get<const char* (*)()>("SrFixtureMenuText");
+        auto network_stop = adapter.Get<bool (*)()>("SrFixtureNetworkStop");
+        auto input_state = adapter.Get<void (*)(std::uint64_t, std::uint64_t, KeelResult)>("SrFixtureInput");
+        if (argc >= 12) Check(network_init(argv[11]), "initialize native protocol fixture");
+        auto factory = adapter.Get<KeelCreateInterfaceFn>("SrFixtureFactory");
+        auto command = adapter.Get<bool (*)(const char*, int)>("SrFixtureCommand");
+        auto frame = adapter.Get<void (*)()>("SrFixtureFrame");
+        auto count = adapter.Get<unsigned (*)()>("SrFixtureCommands");
+        auto cvars = adapter.Get<unsigned (*)()>("SrFixtureConVars");
+        auto set_cvar = adapter.Get<bool (*)(const char*, const char*)>("SrFixtureSetConVar");
+        auto cvar_equals = adapter.Get<bool (*)(const char*, const char*)>("SrFixtureConVarEquals");
+        auto chat = adapter.Get<const char* (*)()>("SrFixtureChatOutput");
+        auto say = adapter.Get<bool (*)(const char*, int)>("SrFixtureChat");
+        auto reconnect = adapter.Get<void (*)()>("SrFixtureReconnect");
+        auto actions = adapter.Get<unsigned (*)(KeelPlayerAction*)>("SrFixturePlayerActions");
+        auto action_state = adapter.Get<void (*)(unsigned, unsigned, bool)>("SrFixtureActionState");
+        auto kick_state = adapter.Get<void (*)(bool, bool, bool)>("SrFixtureKickState");
+        auto kicks = adapter.Get<unsigned (*)()>("SrFixtureKicks");
+        auto kick_reason = adapter.Get<const char* (*)()>("SrFixtureKickReason");
+        auto read_listening = adapter.Get<bool (*)(int, int)>("SrFixtureReadListening");
+        auto write_listening = adapter.Get<bool (*)(int, int, bool)>("SrFixtureWriteListening");
+        auto fail_listening = adapter.Get<void (*)(bool)>("SrFixtureFailListening");
+        auto listening_calls = adapter.Get<unsigned (*)()>("SrFixtureListeningCalls");
+        auto map_changes = adapter.Get<unsigned (*)()>("SrFixtureMapChanges");
+        auto changed_map = adapter.Get<const char* (*)()>("SrFixtureChangedMap");
+        auto restart_variable = adapter.Get<void (*)(unsigned, bool)>("SrFixtureRestartVariable");
+        auto entity_error = adapter.Get<void (*)(unsigned)>("SrFixtureEntityError");
+        auto entity_reads = adapter.Get<unsigned (*)()>("SrFixtureEntityReads");
+        auto messages = tier0.Get<const char* (*)()>("KeelTest_Messages");
+        auto start = host.Get<KeelHostStartFn>("KeelHost_Start");
+        auto complete = host.Get<KeelHostCompleteStartupFn>("KeelHost_CompleteStartup");
+        auto stop = host.Get<KeelHostStopFn>("KeelHost_Stop");
+        KeelHostCompatibilityInfo compatibility{};
+        compatibility.size = sizeof(compatibility);
+        compatibility.profile = "source2root-headless-fixture";
+        compatibility.game_version = "fixture";
+        const auto path = bin.string();
+        const KeelHostStartInfo info{sizeof(info), KEELS2_HOST_ABI_VERSION, factory, factory, path.c_str(),
+                                    "cs2", platform.c_str(), &compatibility};
+        Check(start(&info) == KEELS2_HOST_START_RUNNING && complete(), "real host startup");
+        auto contains = [&](const char* value) { return std::string(messages()).find(value) != std::string::npos; };
+        std::size_t printed = 0;
+        auto run = [&](const std::string& text) {
+            Check(command(text.c_str(), -1), text.c_str());
+            const std::string log = messages();
+            std::cout << log.substr(printed) << std::flush;
+            printed = log.size();
+        };
+        std::cout << messages();
+        if (argc == 11 && std::string(argv[10]) == "stock") {
+            Check(contains("required unload preparation service is unavailable") && count() == 1,
+                  "stock baseline must refuse platform before initialization");
+            Check(stop(), "stock host stops after rejected module");
+            std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
+            return 0;
+        }
+        Check(contains("SR_ExampleAdd registered"), "real example module registration");
+        run("sr");
+        run("sr help plugins");
+        Check(contains("Source2Root Menu:") && contains("Usage: sr plugins <command>"), "approved management menus are real commands");
+        run("sr plugins list");
+        run("sr plugins cmds hello");
+        Check(contains("sr_hello | hello | running | permission: demo.hello"), "script command inventory has owner and required permission");
+        const auto extension_start = std::string(messages()).size();
+        run("sr extensions list");
+        const auto extension_list = std::string(messages()).substr(extension_start);
+        Check(extension_list.find("sr_example" + extension) != std::string::npos && extension_list.find("source2root" + extension) == std::string::npos,
+              "extension inventory excludes unrelated native framework plugins");
+        run("sr config");
+        Check(cvars() == 4 && contains("sr_show_activity = \"5\""), "core settings read specified cfg path and register real KeelS2 ConVars");
+        run("sr config sr_show_activity 13");
+        Check(contains("sr_show_activity = \"13\""), "management setting uses actual ConVar callback");
+        Check(command("sr config sr_show_activity 0", 3), "fixture delivers unauthorized management invocation");
+        const auto config_start = std::string(messages()).size();
+        run("sr config sr_show_activity");
+        Check(std::string(messages()).substr(config_start).find("sr_show_activity = \"13\"") != std::string::npos,
+              "client console cannot change management settings");
+        run("sr plugins unload hello");
+        run("keel plugins unload 2");
+        run("keel plugins pause 1");
+        Check(contains("plugin paused: [01] Source2Root"), "native Source2Root really enters paused state");
+        Check(set_cvar("sr_show_activity", "9") && set_cvar("sr_chat_public_trigger", "/") && set_cvar("sr_chat_silent_trigger", "!"),
+              "operator changes core settings while native plugin callbacks are paused");
+        run("keel plugins resume 1");
+        const auto resumed_config = std::string(messages()).size();
+        run("sr config");
+        const auto resumed_values = std::string(messages()).substr(resumed_config);
+        Check(resumed_values.find("sr_show_activity = \"9\"") != std::string::npos &&
+            resumed_values.find("sr_chat_public_trigger = \"/\"") != std::string::npos &&
+            resumed_values.find("sr_chat_silent_trigger = \"!\"") != std::string::npos,
+            "native resume reconciles a complete changed core snapshot, including swapped prefixes");
+        run("keel plugins pause 1");
+        Check(set_cvar("sr_show_activity", "1") && set_cvar("sr_chat_public_trigger", "??") && set_cvar("sr_chat_silent_trigger", "??"),
+              "operator can produce an invalid pair while callbacks are paused");
+        run("keel plugins resume 1");
+        const auto rejected_config = std::string(messages()).size();
+        run("sr config");
+        const auto rejected_values = std::string(messages()).substr(rejected_config);
+        Check(rejected_values.find("sr_show_activity = \"9\"") != std::string::npos &&
+            rejected_values.find("sr_chat_public_trigger = \"/\"") != std::string::npos &&
+            rejected_values.find("sr_chat_silent_trigger = \"!\"") != std::string::npos,
+            "invalid resumed settings retain the entire previous configuration");
+        Check(cvar_equals("sr_show_activity", "9") && cvar_equals("sr_chat_public_trigger", "/") &&
+            cvar_equals("sr_chat_silent_trigger", "!"), "invalid resumed values are restored in the engine as well as the cache");
+        run("sr config sr_chat_public_trigger \"\"");
+        run("sr config sr_chat_silent_trigger /");
+        run("sr config sr_chat_public_trigger !");
+        run("sr config sr_show_activity 13");
+        run("keel plugins load sr_example" + extension);
+        run("sr plugins load hello");
+        run("sr version");
+        Check(contains("Source2Root Version 1.0.0") && contains("Revision:") && contains("Script API: 2"), "version reports product, build and API metadata");
+        run("sr plugins info hello");
+        Check(contains("hello | running"), "real compiled script initialized");
+        const bool packaged = argc >= 11 && std::string(argv[10]) == "package";
+        auto install_script = [&](const std::string& id, const std::string& bytecode) {
+            Copy(std::filesystem::path(argv[7]).parent_path() / (bytecode + ".smx"), script / "plugins" / id / "main.smx");
+            std::ofstream(script / "plugins" / id / "plugin.json") << "{\"schema\":1,\"id\":\"" << id <<
+                "\",\"name\":\"ConVar fixture\",\"author\":\"tests\",\"version\":\"1.0.0\",\"api\":2,\"entry\":\"main.smx\",\"enabled\":false,\"dependencies\":[]}";
+        };
+        install_script("admin", "admin");
+        run("sr plugins load admin");
+        Check(!command("sr_permissions_reload", -1), "temporary native reload command is removed");
+        run("sr_who");
+        Check(contains("#70 Module fixture player | 76561197960265851 STEAM_1:1:61 [U:1:123]"),
+            "bundled administration uses actual native player metadata and formatting");
+        for (int i = 0; i < 140; ++i) {
+            reconnect();
+            const auto start = std::string(messages()).size();
+            run("sr_who");
+            Check(std::string(messages()).substr(start).find("#" + std::to_string(71 + i) + " Module fixture player") != std::string::npos,
+                "actual host reconnects do not exhaust script player handles");
+        }
+        run("sr_help");
+        Check(contains("sr_reloadadmins - Reload administrators and groups"), "real bundled command help");
+        install_script("player_actions", "player_actions");
+        run("sr plugins load player_actions");
+        KeelPlayerAction last{};
+        run("sr_slap [U:1:123] 10");
+        Check(actions(&last) == 1 && last.kind == KEELS2_PLAYER_ACTION_IMPULSE && last.damage == 10
+            && std::fabs(last.impulse[0]) == 200 && std::fabs(last.impulse[1]) == 200 && last.impulse[2] == 300,
+            "SourcePawn slap reaches actual Keel action service with damage and impulse");
+        run("sr_slay [U:1:123]");
+        Check(actions(&last) == 2 && last.kind == KEELS2_PLAYER_ACTION_KILL, "SourcePawn slay reaches actual Keel kill service");
+        for (unsigned mutation : {1u, 2u, 3u}) {
+            action_state(KEEL_RESULT_OK, mutation, true);
+            const auto begin = std::string(messages()).size();
+            run("sr_slap [U:1:123]");
+            Check(actions(nullptr) == 2 && std::string(messages()).substr(begin).find("no longer available") != std::string::npos,
+                "changed pawn, connection or alive state during entity acquisition prevents action");
+        }
+        action_state(KEEL_RESULT_ENGINE_FAILURE, 0, true);
+        run("sr_slap [U:1:123]");
+        Check(actions(nullptr) == 2 && contains("Player action failed"), "native action failure is not reported as success");
+        action_state(KEEL_RESULT_OK, 0, false);
+        run("sr_slay [U:1:123]");
+        Check(actions(nullptr) == 2 && contains("Target is not alive."), "dead player never reaches action service");
+        action_state(KEEL_RESULT_OK, 0, true);
+        run("sr_slap [U:1:123] 1000");
+        Check(actions(&last) == 3 && last.damage == 1000, "native resources release after refused actions and allow recovery");
+        run("sr plugins unload player_actions");
+        install_script("moderation", "moderation");
+        run("sr plugins load moderation");
+        kick_state(true, false, false);
+        run("sr_kick [U:1:123] Native reason");
+        Check(kicks() == 1 && std::string(kick_reason()) == "Native reason", "public kick reaches typed engine disconnect with full reason");
+        kick_state(true, false, true);
+        run("sr_kick [U:1:123]");
+        Check(kicks() == 1 && contains("Player is no longer available."), "connection changed while acquiring engine interface cannot be kicked");
+        kick_state(false, false, false);
+        run("sr_kick [U:1:123]");
+        Check(kicks() == 1 && contains("Player disconnect is unavailable"), "missing engine interface is a useful failed action");
+        kick_state(true, true, false);
+        const auto self_chat = std::string(chat()).size();
+        Check(command("sr_kick @me", 3), "self kick command through native caller bridge");
+        Check(kicks() == 2 && std::string(kick_reason()) == "Kicked Module fixture player" && std::string(chat()).size() == self_chat,
+            "immediate native self-disconnect provides one disconnect result without a duplicate chat reply");
+        kick_state(true, false, false); reconnect();
+        run("sr_ban [U:1:999] 1 Native persisted reason");
+        Check(contains("Banned 76561197960266727 for 1 minute") && kicks() == 2, "offline account ban persists through actual public runtime");
+        run("sr_unban STEAM_0:1:499");
+        Check(contains("Removed the ban for 76561197960266727"), "stored ban removed using another identity format");
+        run("sr plugins unload moderation");
+        install_script("communications", "communications");
+        run("sr plugins load communications");
+        run("sr_mute [U:1:123]");
+        Check(!read_listening(3, 3) && listening_calls() > 0, "public mute reaches actual typed engine interface");
+        Check(write_listening(3, 3, true) && !read_listening(3, 3), "actual KeelHook filters later engine listening request");
+        run("sr_unmute [U:1:123]");
+        Check(read_listening(3, 3), "unmute restores the latest intercepted request");
+        run("sr_gag [U:1:123]");
+        Check(!say("ordinary gagged chat", 3), "native client-command route suppresses ordinary gagged chat");
+        run("sr_ungag [U:1:123]");
+        Check(say("ordinary visible chat", 3), "native client-command route allows ungagged chat");
+        run("sr_mute [U:1:123]");
+        fail_listening(true);
+        run("sr plugins unload communications");
+        Check(contains("native resource release failed; retained for retry") && !read_listening(3, 3),
+            "failed typed engine restoration retains script cleanup");
+        fail_listening(false);
+        run("sr plugins unload communications");
+        Check(read_listening(3, 3), "script unload retry restores typed engine state");
+        if (!packaged) {
+        install_script("variables", "convars");
+        run("sr plugins load variables");
+        Check(cvars() == 7, "scripts create typed ConVars through the actual KeelS2 C service");
+        run("sr_variables write");
+        run("sr_variables mismatch");
+        Check(contains("typed writes and bounds passed") && contains("type mismatch rejected"), "native bridge preserves integer, float and string types");
+        run("sr plugins pause variables");
+        Check(set_cvar("sr_test_text", "native operator edit") && set_cvar("sr_test_fraction", "0.75"), "real engine adapter changes paused script settings");
+        run("sr plugins reload variables");
+        const auto variable_info = std::string(messages()).size();
+        run("sr plugins cvars variables");
+        Check(cvars() == 7 && std::string(messages()).substr(variable_info).find("sr_test_text = \"native operator edit\" | variables | paused") != std::string::npos,
+              "actual service keeps one definition and current value during paused reload");
+        run("sr plugins resume variables");
+        run("sr_variables");
+        Check(contains("native operator edit"), "resumed script reads the current ConVar value");
+        install_script("variables", "convars_changed");
+        run("sr plugins reload variables");
+        Check(contains("definition changed; use a new name or restart the server") && cvars() == 7,
+              "changed script definition fails without disturbing existing engine values");
+        run("sr plugins unload variables");
+        Check(cvars() == 4, "script unload releases typed ConVars through actual host");
+        Copy(std::filesystem::path(argv[7]).parent_path() / "entity.smx", script / "plugins/entity/entity.smx");
+        {
+            std::ofstream metadata(script / "plugins/entity/plugin.json");
+            metadata << R"({"schema":1,"id":"entity","name":"Entity fixture","author":"tests","version":"1.0.0","api":2,"entry":"entity.smx","enabled":false,"dependencies":[]})";
+        }
+        run("sr plugins load entity");
+        Check(command("sr_health", 3) && entity_reads() == 1 && std::string(chat()).find("entity health 73") != std::string::npos,
+              "actual player, typed entity/schema service and SourcePawn reference output");
+        entity_error(5);
+        Check(command("sr_health", 3) && entity_reads() == 1 && std::string(chat()).find("KeelResult 5") != std::string::npos,
+              "transient entity error is preserved through native/script bridge");
+        entity_error(0);
+        Check(command("sr_health", 3) && entity_reads() == 2, "entity read recovers after transient error");
+        run("sr plugins unload entity");
+        }
+        install_script("greeting", "greeting");
+        run("sr plugins load greeting");
+        run("sr_greeting");
+        Check(contains("Welcome to the server!") && set_cvar("sr_greeting_message", "Welcome back!"), "public greeting example uses real ConVars");
+        run("sr plugins reload greeting");
+        run("sr_greeting");
+        Check(contains("Welcome back!"), "public example keeps the administrator's edited message");
+        run("sr plugins unload greeting");
+        Check(cvars() == 4, "public example cleans up without explicit script stop handler");
+        std::ofstream(script / "configs/allowed_maps.txt") << "\n";
+        std::ofstream(script / "configs/map_menu.txt") << "de_dust2\nde_mirage\n";
+        install_script("server", "server");
+        run("sr plugins load server");
+        run("sr_map de_missing"); frame();
+        Check(map_changes() == 0, "actual typed engine rejects an unavailable map");
+        kick_state(false, false, false);
+        auto begin_server = std::string(messages()).size(); run("sr_map de_dust2"); frame();
+        Check(map_changes() == 0 && std::string(messages()).substr(begin_server).find("unavailable on this game host") != std::string::npos,
+            "missing engine fails before map request acceptance");
+        kick_state(true, false, false);
+        Check(command("sr_map de_dust2", 3), "client requests map through actual module");
+        Check(map_changes() == 0 && std::string(chat()).find("Requested a map change to de_dust2") != std::string::npos,
+            "issuer confirmation precedes next-frame ChangeLevel");
+        frame(); Check(map_changes() == 1 && std::string(changed_map()) == "de_dust2", "typed ChangeLevel receives checked map and null landmark");
+        restart_variable(0, false); begin_server = std::string(messages()).size(); run("sr_restart");
+        Check(std::string(messages()).substr(begin_server).find("Round restart is unavailable") != std::string::npos,
+            "missing engine restart ConVar fails without constructing a replacement");
+        restart_variable(4, false); begin_server = std::string(messages()).size(); run("sr_restart 5");
+        Check(std::string(messages()).substr(begin_server).find("Round restart") != std::string::npos && cvar_equals("mp_restartgame", "0"),
+            "wrong-type restart variable is unchanged");
+        restart_variable(2, false); run("sr_restart");
+        Check(cvar_equals("mp_restartgame", "1"), "native restart writes typed engine mp_restartgame");
+        run("sr_restart 60"); Check(cvar_equals("mp_restartgame", "60"), "restart accepts upper bound");
+        run("sr_restart 0"); run("sr_restart 61"); Check(cvar_equals("mp_restartgame", "60"), "invalid delays never reach engine");
+        restart_variable(2, true); begin_server = std::string(messages()).size(); run("sr_restart 5");
+        Check(cvar_equals("mp_restartgame", "60") && std::string(messages()).substr(begin_server).find("request failed") != std::string::npos,
+            "native restart surfaces rejected engine write");
+        restart_variable(2, false);
+        run("sr plugins unload server");
+        const auto audience = adapter.Get<void (*)(bool)>("SrFixtureActivityAudience");
+        const auto player_chat = adapter.Get<const char* (*)(int)>("SrFixturePlayerChat");
+        audience(true);
+        install_script("activity", "activity");
+        run("sr plugins load activity");
+        Check(set_cvar("sr_show_activity", "13"), "set default activity mask in actual engine");
+        auto admin_chat = std::string(player_chat(3));
+        auto ordinary_chat = std::string(player_chat(4));
+        run("sr_wave");
+        Check(std::string(player_chat(3)).substr(admin_chat.size()) == "[S2R] Server waved.\n" &&
+            std::string(player_chat(4)).substr(ordinary_chat.size()) == "[S2R] ADMIN: Waved.\n",
+            "actual player enumeration, permission audience and private chat formatting");
+        admin_chat = player_chat(3); ordinary_chat = player_chat(4);
+        Check(command("sr_wave", 3), "execute activity example as player");
+        Check(std::string(player_chat(3)).substr(admin_chat.size()) == "[S2R] Waved.\n" &&
+            std::string(player_chat(4)).substr(ordinary_chat.size()) == "[S2R] ADMIN: Waved.\n",
+            "actual issuer receives exactly one private confirmation");
+        Check(set_cvar("sr_show_activity", "0"), "disable activity announcements in actual engine");
+        admin_chat = player_chat(3); ordinary_chat = player_chat(4);
+        Check(command("sr_wave", 3) && std::string(player_chat(3)).substr(admin_chat.size()) == "[S2R] Waved.\n" &&
+            std::string(player_chat(4)) == ordinary_chat, "disabled activity retains only issuer confirmation");
+        run("sr plugins unload activity");
+        audience(false);
+        Check(set_cvar("sr_show_activity", "13"), "restore default after activity example");
+        const auto baseline = count();
+        run("sr_hello");
+        Check(contains("SourcePawn and the C++ extension returned 42."), "real extension callback result");
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        frame();
+        Check(contains("The delayed SourcePawn callback ran."), "real timer through host frame");
+        auto occurrences = [](const std::string& text, const std::string& part) {
+            unsigned count = 0;
+            for (std::size_t pos = 0; (pos = text.find(part, pos)) != std::string::npos; pos += part.size()) ++count;
+            return count;
+        };
+        auto answers = [&] { return occurrences(chat(), "SourcePawn and the C++ extension returned 42."); };
+        if (argc >= 12) {
+            network_advertise();
+            input_state(KEELS2_BUTTON_USE, 1, KEEL_RESULT_OK);
+            Check(command("sr_hello", 3), "client opens actual module menu");
+            Check(std::string(menu_text()).find("Forward/Back: navigate") != std::string::npos, "module renders action hints through learned event");
+            const auto selected = [&] { return occurrences(chat(), "The menu selection ran in SourcePawn."); };
+            const auto before_selection = selected();
+            frame(); frame();
+            Check(selected() == before_selection && *menu_text(), "native module baselines held input at opening");
+            input_state(0, 1, KEEL_RESULT_OK); frame();
+            input_state(KEELS2_BUTTON_USE, 1, KEEL_RESULT_OK); frame();
+            Check(selected() == before_selection + 1 && !*menu_text(), "native module frame reads Keel input and invokes actual script menu once");
+            frame(); Check(selected() == before_selection + 1, "native module does not repeat held selection");
+            input_state(0, 1, KEEL_RESULT_OK);
+            Check(command("sr_hello", 3), "reopen native module menu");
+            input_state(KEELS2_BUTTON_USE, 2, KEEL_RESULT_OK); frame(); frame();
+            Check(selected() == before_selection + 1 && *menu_text(), "native module resets context baseline");
+            input_state(0, 2, KEEL_RESULT_NOT_READY); frame();
+            input_state(KEELS2_BUTTON_USE, 2, KEEL_RESULT_OK); frame();
+            Check(selected() == before_selection + 1, "native module resets after adapter read failure");
+            input_state(0, 2, KEEL_RESULT_OK); frame();
+            input_state(KEELS2_BUTTON_RELOAD, 2, KEEL_RESULT_OK); frame();
+            Check(!*menu_text() && selected() == before_selection + 1, "native module closes through reload without selection");
+            input_state(0, 2, KEEL_RESULT_OK);
+            std::cout << "native input service -> module frame -> menu packet -> SourcePawn callback passed\n";
+        }
+        run("sr plugins pause hello");
+        const auto paused_start = std::string(messages()).size();
+        run("sr_hello");
+        Check(std::string(messages()).substr(paused_start).find("SourcePawn and the C++ extension returned 42.") == std::string::npos,
+              "real management pause stops script command callbacks");
+        Check(command("sr plugins resume hello", 3), "fixture delivers unauthorized resume invocation");
+        run("sr plugins refresh");
+        const auto paused_info = std::string(messages()).size();
+        run("sr plugins info hello");
+        Check(std::string(messages()).substr(paused_info).find("hello | paused") != std::string::npos,
+              "client cannot resume plugin and refresh preserves paused state");
+        run("sr plugins resume hello.smx");
+        const auto chat_answers = answers();
+        Check(say("!hello", 3) && answers() == chat_answers + 1, "public chat executes once and remains publishable");
+        Check(!say("/hello", 3) && answers() == chat_answers + 2, "silent chat executes once before publication is suppressed");
+        Check(!say("/hello \"unterminated", 3) && answers() == chat_answers + 2, "malformed known silent command is suppressed without execution");
+        std::ofstream(script / "configs/admins.cfg") << R"("Admins" {})";
+        run("sr_reloadadmins");
+        Check(!say("/hello", 3) && answers() == chat_answers + 2 && occurrences(chat(), "You do not have access to this command.") == 1,
+              "denied silent command cannot publish or execute");
+        Check(!say("/slpa @me", 3) && answers() == chat_answers + 2 && occurrences(chat(), "Unknown command \"slpa\".") == 1,
+              "unknown silent command is suppressed and replied to privately");
+        std::ofstream(script / "configs/admins.cfg") << permissions;
+        run("sr_reloadadmins");
+        const auto custom_answers = answers();
+        Check(set_cvar("sr_chat_public_trigger", "!!"), "direct engine ConVar update");
+        run("sr config sr_chat_silent_trigger ??");
+        Check(say("!!hello", 3) && answers() == custom_answers + 1, "configured public trigger remains visible");
+        Check(!say("??hello", 3) && answers() == custom_answers + 2, "configured silent trigger dispatches privately");
+        Check(!say("??slpa", 3) && occurrences(chat(), "Unknown command \"slpa\".") == 2,
+              "custom silent trigger hides unknown commands");
+        run("sr config sr_chat_public_trigger ?");
+        Check(!say("??hello", 3) && answers() == custom_answers + 3, "longer silent prefix takes precedence over public prefix");
+        Check(set_cvar("sr_chat_public_trigger", "??"), "fixture submits an invalid equal trigger through the engine");
+        Check(say("?hello", 3) && answers() == custom_answers + 4, "invalid ConVar change restores previous effective trigger");
+        run("sr config sr_chat_public_trigger \"\"");
+        Check(say("?hello", 3) && answers() == custom_answers + 4, "empty public trigger disables shortcuts");
+        run("sr config sr_chat_public_trigger !");
+        run("sr config sr_chat_silent_trigger /");
+        std::ifstream preserved_input(core_cfg);
+        const std::string preserved((std::istreambuf_iterator<char>(preserved_input)), std::istreambuf_iterator<char>());
+        Check(preserved == core_values, "runtime settings do not overwrite startup configuration");
+        const auto before_reconnect = std::string(chat());
+        reconnect();
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        frame();
+        Check(std::string(chat()) == before_reconnect, "delayed callbacks cannot follow a recycled player slot");
+        const auto provider_refusal = std::string(messages()).size();
+        run("keel plugins unload 2");
+        Check(std::string(messages()).substr(provider_refusal).find(
+            "plugin unload is blocked by dependent Source2Root: Source2Root Example") != std::string::npos &&
+            count() == baseline, "provider lease blocks unload and retains commands");
+        run("sr_hello");
+        Check(std::string(messages()).substr(provider_refusal).find(
+            "SourcePawn and the C++ extension returned 42.") != std::string::npos,
+            "retained provider still executes its native through SourcePawn");
+        run("sr plugins unload hello");
+        run("keel plugins unload 2");
+        run("sr plugins reload hello");
+        Check(contains("missing native: SR_ExampleAdd"), "missing provider rejected");
+        for (unsigned i = 0; i < 10; ++i) {
+            run("keel plugins load sr_example" + extension);
+            run("sr plugins reload hello");
+            Check(count() == baseline, "registration count after native/script reload");
+            run("sr_hello");
+            run("sr plugins unload hello");
+            run("keel plugins unload 2");
+        }
+        if (!packaged) {
+        const auto example_path = std::filesystem::path(argv[5]);
+        const auto test_example = example_path.parent_path() / (example_path.stem().string() + "_test" + extension);
+        Copy(test_example, plugins / ("sr_example" + extension));
+        run("keel plugins load sr_example" + extension);
+        run("sr plugins reload hello");
+        std::filesystem::path loaded_test;
+        for (const auto& file : std::filesystem::recursive_directory_iterator(plugins / ".runtime"))
+            if (file.path().filename() == "sr_example" + extension) loaded_test = file.path();
+        Check(!loaded_test.empty(), "actual loader retained extension image");
+        Library extension_control(loaded_test);
+        auto arm = extension_control.Get<void (*)(void (*)())>("SrFixtureDuringNative");
+        during_command = command;
+        arm(&AttemptRetire);
+        run("sr_hello");
+        arm(nullptr);
+        extension_control.Close();
+        Check(during_ok && contains("callback active; retained for unload retry"), "active real native call cannot destroy its script VM");
+        run("sr plugins info hello");
+        Check(contains("hello | retiring"), "active unload stops new script dispatch");
+        run("sr plugins unload hello");
+        run("keel plugins unload 2");
+        }
+        run("sr plugins load greeting");
+        Check(cvars() == 6, "script settings active before native core unload");
+        run("sr plugins load communications");
+        run("sr_mute [U:1:123]");
+        fail_listening(true);
+        run("keel plugins pause 1");
+        Check(contains("plugin pause preparation is incomplete; plugin remains running: Source2Root"),
+            "native pause refuses failed listening restoration");
+        fail_listening(false);
+        Check(write_listening(3, 3, true) && !read_listening(3, 3), "refused pause restores active voice filtering");
+        run("keel plugins pause 1");
+        Check(read_listening(3, 3), "successful native pause restores the original listening value");
+        Check(write_listening(3, 3, false), "external listening request while the native platform is paused");
+        run("keel plugins resume 1");
+        run("sr_unmute [U:1:123]");
+        Check(!read_listening(3, 3), "native pause must not lose external voice intent before later restoration");
+        Check(write_listening(3, 3, true), "reset external listening baseline");
+        run("sr_mute [U:1:123]");
+        fail_listening(true);
+        run("keel plugins unload 1");
+        Check(contains("plugin unload preparation is incomplete; plugin retained: Source2Root") && !read_listening(3, 3),
+            "native unload retains the platform when voice restoration fails");
+        fail_listening(false);
+        run("keel plugins unload 1");
+        Check(read_listening(3, 3), "native unload retry restores voice during unload preparation");
+        Check(count() == 1 && cvars() == 0, "module cleanup removes its commands and ConVars");
+        std::ofstream(core_cfg) << "sr_show_activity 9\nsr_chat_public_trigger +\nsr_chat_silent_trigger ##\n";
+        Copy(argv[5], plugins / ("sr_example" + extension));
+        run("keel plugins load source2root" + extension);
+        Check(cvars() == 4, "changed cfg values do not conflict with persistent KeelS2 ConVar definitions");
+        const auto reloaded_config = std::string(messages()).size();
+        run("sr config");
+        Check(std::string(messages()).substr(reloaded_config).find("sr_show_activity = \"9\"") != std::string::npos,
+              "native core reload reads changed startup settings");
+        run("keel plugins load sr_example" + extension);
+        run("sr plugins load hello/hello.smx");
+        run("sr plugins load admin");
+        Check(count() == baseline, "live scripts restored before global host shutdown");
+        const auto reloaded_answers = answers();
+        Check(say("+hello", 3) && answers() == reloaded_answers + 1 && !say("##unknown", 3),
+              "reloaded core uses new public and silent triggers");
+        run("sr plugins load greeting");
+        if (argc == 15) {
+            Copy(argv[13], script / "plugins/roll/roll.smx");
+            Copy(argv[14], script / "plugins/roll/plugin.json");
+            run("sr plugins load roll");
+            Check(contains("missing native: RandomInt") && !command("sr_roll", -1), "optional script needs its native provider");
+            Copy(argv[12], plugins / ("source2root_random" + extension));
+            run("keel plugins load source2root_random" + extension);
+            run("sr plugins retry roll");
+            const auto before_roll = std::string(messages()).size();
+            run("sr_roll 1");
+            Check(std::string(messages()).substr(before_roll).find("Rolled 1 of 1.") != std::string::npos,
+                "public script calls the typed RandomInt extension through the VM");
+            const auto before_usage = std::string(messages()).size();
+            for (const auto* invalid : {"0", "1000001", "x", "2 3"}) run(std::string("sr_roll ") + invalid);
+            const auto usage = std::string(messages()).substr(before_usage);
+            Check(usage.find("Usage: sr_roll [sides: 1-1000000]") != std::string::npos && usage.find("Rolled ") == std::string::npos,
+                "invalid roll arguments return usage without rolling");
+            const auto before_chat = std::string(chat()).size();
+            Check(command("sr_roll 1", 3) && std::string(chat()).substr(before_chat).find("Rolled 1 of 1.") != std::string::npos,
+                "public extension command replies to its player caller");
+            install_script("random_native", "random_native");
+            run("sr plugins load random_native");
+            Check(contains("Random native bounds passed."), "real extension covers full int32 range and deterministic endpoints");
+            run("sr_random_error");
+            Check(contains("Minimum must not exceed maximum.") && contains("random_native.sp"),
+                "native exception becomes a script diagnostic with source location");
+            run("sr plugins unload random_native");
+            const auto random_refusal = std::string(messages()).size();
+            run("keel plugins unload \"Source2Root Random\"");
+            run("sr_roll 1");
+            const auto retained_random = std::string(messages()).substr(random_refusal);
+            Check(retained_random.find("plugin unload is blocked by dependent Source2Root: Source2Root Random") != std::string::npos &&
+                retained_random.find("Rolled 1 of 1.") != std::string::npos,
+                "script lease keeps the native extension callable after refused unload");
+            run("sr plugins unload roll");
+            run("keel plugins unload \"Source2Root Random\"");
+            run("sr plugins load roll");
+            Check(!command("sr_roll", -1), "extension unload removes native registration");
+            run("keel plugins load source2root_random" + extension);
+            run("sr plugins retry roll");
+            run("sr_roll 1");
+        }
+        Check(!stop(), "first global stop retains modules while platform releases script provider leases");
+        Check(stop(), "second global stop completes after every plugin can prepare");
+        std::cout << messages() << "real KeelS2 module, SourcePawn, native lease and reload tests passed\n";
+        if (argc >= 12) Check(network_stop(), "native menu message allocations released");
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        std::quick_exit(1);
+    }
+}

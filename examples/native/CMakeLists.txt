@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.25)
+project(Source2RootRandom VERSION 1.0.0 LANGUAGES CXX)
+find_package(Source2Root CONFIG REQUIRED)
+keels2_add_plugin(source2root_random extension.cpp)
+target_link_libraries(source2root_random PRIVATE Source2Root::Extension)

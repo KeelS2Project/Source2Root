@@ -1,0 +1,3 @@
+#pragma once
+
+#define SOURCE2ROOT_BUILD_REVISION "@SR_BUILD_REVISION@"

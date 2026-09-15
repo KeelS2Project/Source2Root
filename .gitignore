@@ -1,0 +1,12 @@
+/build*/
+/out/
+/.deps/
+/.venv/
+__pycache__/
+*.smx
+*.so
+*.dll
+*.pdb
+*.o
+*.obj
+*.log

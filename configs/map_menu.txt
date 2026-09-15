@@ -1,0 +1,10 @@
+// Menu choices when allowed_maps.txt contains no names.
+// Add your custom maps here. Only installed maps appear.
+de_dust2
+de_mirage
+de_inferno
+de_nuke
+de_ancient
+de_anubis
+de_vertigo
+cs_office

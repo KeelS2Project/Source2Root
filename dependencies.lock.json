@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "keels2": {
+    "repository": "https://github.com/KeelS2Project/KeelS2.git",
+    "revision": "77619db1acb1062c079e88bf91717bbffa8c5bf9",
+    "version": "1.0.0",
+    "plugin_abi": 4,
+    "manifest_version": 1,
+    "required_services": {
+      "keels2.unload": 1,
+      "keels2.services": 1,
+      "keels2.players": 1,
+      "keels2.source2.native_runtime": 1,
+      "keels2.source2.callbacks": 1,
+      "keels2.lifecycle": 1,
+      "keels2.keelhook": 5,
+      "keels2.pause": 1,
+      "keels2.player_input": 1
+    }
+  },
+  "sourcepawn": {
+    "repository": "https://github.com/alliedmodders/sourcepawn.git",
+    "revision": "11b22edb634b9764d19fd28699e03289cfd18520",
+    "version": "1.12",
+    "release_provenance": "SourceMod 1.12.0.7253 sourcepawn submodule",
+    "mode": "x64 interpreter",
+    "amtl_revision": "2d3b1a3378a3728637f26660c9ffc2df3189cf62",
+    "googletest_revision": "a651a4d44e65b749467fa3dddf93819a22f0cc4a"
+  },
+  "ambuild": {
+    "repository": "https://github.com/alliedmodders/ambuild.git",
+    "revision": "01212cb57c96561f664b6dfb2ee10e66de6f81e4"
+  },
+  "hl2sdk": {
+    "revision": "e5a8acad99ab33143be68761384dbf9fc5fe166a",
+    "sha256": "b1bb801698b0efb068c9dc2f6c3c75a020db23784c6047f58348eba02ec1cb57"
+  },
+  "json": {
+    "revision": "9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
+    "version": "3.11.3",
+    "source_archive_sha256": "0dbc5e40a01ff142e7e68c03e85247a4dcede2f592d12d3677dee3664d17975a",
+    "header_sha256": "9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6"
+  },
+  "references": {
+    "swiftlys2": "2a22a8cfb9a3c1c4637d550f72e2482096c4fe02"
+  }
+}

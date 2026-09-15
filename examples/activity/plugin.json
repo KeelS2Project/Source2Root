@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "activity",
+  "name": "Activity example",
+  "author": "KeelS2Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "activity.smx",
+  "enabled": true,
+  "dependencies": []
+}

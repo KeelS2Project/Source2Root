@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "moderation",
+  "name": "Source2Root moderation",
+  "author": "KeelS2Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "moderation.smx",
+  "enabled": true,
+  "dependencies": []
+}

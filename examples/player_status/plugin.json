@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "player_status",
+  "name": "Player status",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "player_status.smx",
+  "enabled": true,
+  "dependencies": []
+}

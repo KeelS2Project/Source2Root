@@ -1,0 +1,2 @@
+// One lowercase map name per line. Empty permits every installed map.
+// Changes apply to the next sr_map command or menu selection.
