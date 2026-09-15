@@ -121,7 +121,7 @@ void TargetsMenu(Player caller, const char[] arguments, int operation)
     menuActions[slot] = operation;
     Player players[128]; int count = GetPlayers(players, sizeof(players)), added;
     if (count < 0) { Failure(caller); return; }
-    Menu menu = CreateMenu(titles[operation], permissions[operation], Selected);
+    Menu menu = CreateMenu(titles[operation], permissions[operation], Selected, BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     for (int i = 0; i < count; i++) {
         char name[129], label[96]; int userid;

@@ -138,7 +138,8 @@ void Arguments::Output(int index, int capacity, const std::string& value) const 
     std::memcpy(data, value.c_str(), value.size() + 1);
 }
 
-SourcePawn::IPluginFunction* Arguments::Callback(int index) const {
+SourcePawn::IPluginFunction* Arguments::Callback(int index, bool optional) const {
+    if (optional && context_.IsNullFunctionId(Int(index))) return nullptr;
     auto* function = context_.GetFunctionById(Int(index));
     if (!function || context_.IsNullFunctionId(Int(index)))
         throw NativeError("invalid callback function");

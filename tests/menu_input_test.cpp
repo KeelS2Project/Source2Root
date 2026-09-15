@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
         app.Dispatch(sr::Origin::ClientConsole, slot, "sr_inputmenu");
         Require(app.CurrentMenu(host.players.at(slot)) != 0, "script menu opened");
         Require(host.menus.at(slot).find("Forward/Back: move") != std::string::npos &&
-            host.menus.at(slot).find("Use: select") != std::string::npos && host.menus.at(slot).find("Reload: back/close") != std::string::npos,
+            host.menus.at(slot).find("Use: select") != std::string::npos && host.menus.at(slot).find("Reload: close") != std::string::npos,
             "menu explains actual action controls");
     };
     const auto press = [&](std::uint64_t button, int slot = 3) {
@@ -134,6 +134,36 @@ int main(int argc, char** argv) {
     Require(app.CurrentMenu(host.players.at(3)) == submenu && host.replies.empty(), "held select cannot cascade or repeat");
     press(KEELS2_BUTTON_USE);
     Require(!app.CurrentMenu(host.players.at(3)) && host.replies == std::vector<std::string>{"selected=20"}, "fresh press selects submenu once");
+    host.replies.clear(); host.input[3].buttons = 0; open();
+    press(KEELS2_BUTTON_USE);
+    Require(host.menus.at(3).find("Reload: parent menu") != std::string::npos, "submenu states the parent action");
+    for (int i = 0; i < 3; ++i) press(KEELS2_BUTTON_BACK);
+    Require(host.menus.at(3).find("Page 2/2") != std::string::npos, "submenu reaches a later page");
+    press(KEELS2_BUTTON_RELOAD);
+    const auto returned = app.CurrentMenu(host.players.at(3));
+    Require(returned && host.menus.at(3).find("Input test") != std::string::npos && host.replies.empty(),
+        "Reload invokes the parent callback from any submenu page without selecting an item");
+    tick(); tick();
+    Require(app.CurrentMenu(host.players.at(3)) == returned, "held Reload cannot close the newly opened parent");
+    press(KEELS2_BUTTON_RELOAD);
+    Require(!app.CurrentMenu(host.players.at(3)), "fresh Reload closes the top-level first page");
+
+    host.input[3].buttons = 0; open(); press(KEELS2_BUTTON_USE);
+    host.fail_clear = true; press(KEELS2_BUTTON_RELOAD);
+    Require(host.menus.at(3).find("Submenu test") != std::string::npos, "failed clear cannot invoke parent callback");
+    host.fail_clear = false; tick();
+    Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty(), "clear retry closes without late parent callback");
+
+    host.input[3].buttons = 0; open(); press(KEELS2_BUTTON_USE);
+    now += std::chrono::seconds(20); app.Tick(now);
+    Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty(), "submenu timeout closes instead of invoking parent callback");
+
+    host.input[3].buttons = 0; open(); press(KEELS2_BUTTON_USE);
+    std::ofstream(admins) << R"("Admins" {})"; app.ReloadPermissions();
+    press(KEELS2_BUTTON_RELOAD);
+    Require(!app.CurrentMenu(host.players.at(3)) && host.menus.at(3).empty(), "parent callback rechecks current menu permission");
+    std::ofstream(admins) << allowed; app.ReloadPermissions();
+
     host.replies.clear(); host.input[3].buttons = 0; open();
     press(KEELS2_BUTTON_BACK); press(KEELS2_BUTTON_USE);
     Require(app.CurrentMenu(host.players.at(3)) && host.replies.empty(), "disabled item ignores key selection");

@@ -70,7 +70,8 @@ int main(int argc, char** argv) {
     const std::string assignments = R"("Admins" { "Root" { "identity" "[U:1:123]" "group" "root" }
         "Mod" { "identity" "[U:1:124]" "group" "moderator" } "Equal" { "identity" "[U:1:125]" "group" "root" } })";
     std::ofstream(root / "configs/admin_groups.cfg") << R"("Groups" { "root" { "immunity" "100" }
-        "moderator" { "immunity" "10" "permissions" { "admin.help" "1" "admin.menu" "1" "admin.slap" "1" } } })";
+        "moderator" { "immunity" "10" "permissions" { "admin.help" "1" "admin.menu" "1" "admin.slap" "1" } }
+        "child_only" { "permissions" { "admin.slay" "1" } } })";
     std::ofstream(admins) << assignments;
     auto install = [&](const char* id) {
         const auto directory = root / "plugins" / id;
@@ -178,6 +179,23 @@ int main(int argc, char** argv) {
         if (mode == 0) { run(3, "sr_help"); Require(!host.Has(3, "sr_slap"), "paused provider disappears from help"); Require(app.Resume("player_actions"), "resume provider"); }
         if (mode == 1) Require(app.Load(install("player_actions")), "restore menu provider");
     }
+    run(3, "sr_admin"); select(3, 3); select(3, 2);
+    Require(input(3, sr::MenuInput::Back) && host.menu.find("Slap damage") != std::string::npos && host.actions.empty(),
+        "target selection backs to damage choices without applying a slap");
+    Require(input(3, sr::MenuInput::Back) && host.menu.find("Source2Root administration") != std::string::npos && host.actions.empty(),
+        "damage choices back across scripts to administration");
+    Require(input(3, sr::MenuInput::Back) && host.menu.empty(), "top-level first page closes");
+    run(3, "sr_admin"); select(3, 4);
+    Require(app.Unload("admin"), "parent provider can unload while child is open");
+    Require(input(3, sr::MenuInput::Back) && host.menu.empty() && host.Has(3, "Command menu is unavailable"),
+        "back resolves parent provider at use and does not retain an unloaded callback");
+    Require(app.Load(install("admin")), "restore parent provider");
+    run(3, "sr_admin"); select(3, 4);
+    std::ofstream(admins) << R"("Admins" { "Root" { "identity" "[U:1:123]" "group" "child_only" } })";
+    app.ReloadPermissions();
+    Require(input(3, sr::MenuInput::Back) && host.menu.empty() && host.Has(3, "You do not have access"),
+        "return to administration rechecks parent permission");
+    std::ofstream(admins) << assignments; app.ReloadPermissions();
     run(3, "sr_routes recurse"); Require(host.Has(3, "recursion limit") && host.Has(3, "entered=8"), "nested command menus have bounded recursion");
     run(3, "sr_routes recurse"); Require(host.Has(3, "entered=8"), "depth guard resets after nested returns");
     run(-1, "sr_routes"); single(-1, "Use this command in the game");

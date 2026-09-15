@@ -18,6 +18,7 @@ typedef CommandCallback = function void (Player caller, const char[] arguments);
 typedef TimerCallback = function void (Player target);
 typedef EventCallback = function void (const char[] event);
 typedef MenuCallback = function void (Player player, int item);
+typedef MenuBackCallback = function void (Player player);
 
 native bool RegisterCommand(const char[] name, const char[] permission, CommandCallback callback, const char[] usage = "");
 native bool GetCommandInfo(Player caller, const char[] name, char[] usage, int capacity, bool& hasMenu);
@@ -73,7 +74,8 @@ native bool CanTargetIdentity(Player caller, const char[] identity, const char[]
 native bool ReloadAdmins(Player caller);
 native bool GetLastError(char[] output, int capacity);
 native bool GetDataPath(char[] output, int capacity);
-native Menu CreateMenu(const char[] title, const char[] permission, MenuCallback callback);
+native Menu CreateMenu(const char[] title, const char[] permission, MenuCallback callback,
+    MenuBackCallback back = INVALID_FUNCTION);
 native bool AddMenuItem(Menu menu, const char[] text, bool enabled = true, int value = -1);
 native bool ShowMenu(Menu menu, Player player, int timeoutMilliseconds = 20000);
 native bool CloseMenu(Menu menu);

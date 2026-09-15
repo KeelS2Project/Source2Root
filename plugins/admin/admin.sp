@@ -10,6 +10,7 @@ public bool OnPluginStart()
         && RegisterCommand("sr_admin", "admin.menu", Admin)
         && RegisterCommand("sr_who", "admin.who", Who)
         && RegisterCommand("sr_reloadadmins", "admin.reloadadmins", Reload)
+        && SetCommandMenu("sr_admin", Admin)
         && SetCommandMenu("sr_help", Help)
         && SetCommandMenu("sr_who", Who)
         && SetCommandMenu("sr_reloadadmins", Reload);

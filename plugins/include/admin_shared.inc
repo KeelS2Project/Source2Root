@@ -27,6 +27,11 @@ stock void Failure(Player caller)
     ReplyToCommand(caller, error);
 }
 
+stock void BackToAdministration(Player caller)
+{
+    if (!OpenCommandMenu(caller, "sr_admin")) Failure(caller);
+}
+
 stock void SafeName(char[] name)
 {
     for (int i = 0; name[i]; i++)

@@ -20,8 +20,11 @@ public void Selected(Player caller, int value)
 {
     if (value == 10)
     {
-        Menu menu = CreateMenu("Submenu test", "test.menu", Selected);
+        Menu menu = CreateMenu("Submenu test", "test.menu", Selected, Back);
         AddMenuItem(menu, "Confirm", true, 20);
+        AddMenuItem(menu, "Second", true, 21);
+        AddMenuItem(menu, "Third", true, 22);
+        AddMenuItem(menu, "Fourth", true, 23);
         ShowMenu(menu, caller);
     }
     else
@@ -30,4 +33,9 @@ public void Selected(Player caller, int value)
         Format(text, sizeof(text), "selected=%d", value);
         ReplyToCommand(caller, text);
     }
+}
+
+public void Back(Player caller)
+{
+    Open(caller, "");
 }

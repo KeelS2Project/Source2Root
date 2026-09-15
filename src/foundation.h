@@ -143,7 +143,7 @@ private:
         PluginState replacement_state = PluginState::Running;
     };
     struct Timer { Clock::time_point due; SourcePawn::IPluginFunction* callback; Cell target; bool across_maps = false; };
-    struct ScriptMenu { Menu menu; SourcePawn::IPluginFunction* callback; };
+    struct ScriptMenu { Menu menu; SourcePawn::IPluginFunction* callback; SourcePawn::IPluginFunction* back = nullptr; };
     struct ScriptConVar { std::string name; };
     struct ConfigFile { std::string text; std::size_t cursor = 0; };
     using Resource = std::variant<Player, Timer, ScriptMenu, ScriptConVar, ConfigFile>;

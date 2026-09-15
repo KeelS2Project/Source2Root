@@ -178,8 +178,9 @@ void Foundation::Bind(Script& script) {
         auto permission = args.String(2, 96);
         if (title.empty() || !ValidPermission(permission)) throw NativeError("invalid menu title or permission");
         return handles_.Add(script.owner, MenuType,
-            ScriptMenu{Menu{std::move(title), std::move(permission), {}}, args.Callback(3)});
-    });
+            ScriptMenu{Menu{std::move(title), std::move(permission), {}}, args.Callback(3),
+                args.Count() == 4 ? args.Callback(4, true) : nullptr});
+    }, 4);
     bind("AddMenuItem", 3, [&](const Arguments& args) {
         auto& menu = std::get<ScriptMenu>(handles_.Get(args.Int(1), script.owner, MenuType));
         if (menu.menu.items.size() >= 128) throw NativeError("menu item limit (128) reached");
@@ -207,7 +208,7 @@ void Foundation::Bind(Script& script) {
         if (!CloseDisplay(player.slot)) { script.error = "previous menu clear failed"; return 0; }
         if (next_session_ == std::numeric_limits<std::uint64_t>::max()) throw NativeError("menu session IDs exhausted");
         menu.menu.selected = 0;
-        const auto result = host_.RenderMenu(player, menu.menu.Html(), args.Int(3));
+        const auto result = host_.RenderMenu(player, menu.menu.Html(menu.back != nullptr), args.Int(3));
         if (result != KEEL_RESULT_OK) {
             script.error = "menu renderer unavailable (KeelResult " + std::to_string(result) + ")"; return 0;
         }

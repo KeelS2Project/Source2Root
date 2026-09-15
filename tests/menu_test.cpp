@@ -28,6 +28,9 @@ int main() {
     Require(menu.Html().find("Page 2/2") != std::string::npos, "pagination");
     Require(menu.Html().find("fourth") != std::string::npos && menu.Html().find("fifth") != std::string::npos &&
         menu.Html().find("third") == std::string::npos, "remaining choices appear on second page");
+    Require(menu.Html().find("Reload: previous page") != std::string::npos &&
+        menu.Html(true).find("Reload: parent menu") != std::string::npos,
+        "footer distinguishes previous page from parent menu");
     Require(menu.Input(sr::MenuInput::Select) == sr::MenuAction::Selected, "select second page");
     Require(menu.Input(sr::MenuInput::Back) == sr::MenuAction::Changed && menu.selected == 0, "back page");
     Require(menu.Input(sr::MenuInput::Back) == sr::MenuAction::Cancelled, "cancel");

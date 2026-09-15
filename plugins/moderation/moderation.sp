@@ -233,7 +233,7 @@ void PlayerMenu(Player caller, bool ban)
     Player players[128]; int count = GetPlayers(players, sizeof(players)), added;
     if (count < 0) { Failure(caller); return; }
     char permission[16]; Format(permission, sizeof(permission), ban ? "admin.ban" : "admin.kick");
-    Menu menu = CreateMenu(ban ? "Ban a player" : "Kick a player", permission, ban ? BanSelected : KickSelected);
+    Menu menu = CreateMenu(ban ? "Ban a player" : "Kick a player", permission, ban ? BanSelected : KickSelected, ban ? BackToBanDuration : BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     for (int i = 0; i < count; i++) {
         char name[129], label[96], identity[24]; int userid;
@@ -260,7 +260,7 @@ public void KickSelected(Player caller, int value)
 public void BanMenu(Player caller, const char[] arguments)
 {
     if (!Ready(caller, arguments, "admin.ban", "Usage: sr_ban <target-or-SteamID> <minutes> [reason]")) return;
-    Menu menu = CreateMenu("Ban duration", "admin.ban", DurationSelected);
+    Menu menu = CreateMenu("Ban duration", "admin.ban", DurationSelected, BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     int values[] = {0, 30, 60, 1440, 10080};
     for (int i = 0; i < sizeof(values); i++) {
@@ -293,7 +293,7 @@ void StoredBansMenu(Player caller)
     if (count < 0) { Failure(caller); return; }
     if (!count) { ReplyToCommand(caller, "No bans are stored."); return; }
     if (pages[slot] >= count) pages[slot] = ((count - 1) / 8) * 8;
-    Menu menu = CreateMenu("Remove a stored ban", "admin.unban", UnbanSelected);
+    Menu menu = CreateMenu("Remove a stored ban", "admin.unban", UnbanSelected, BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     for (int i = 0; i < 8; i++) {
         accounts[slot][i][0] = 0;
@@ -320,4 +320,9 @@ public void UnbanSelected(Player caller, int value)
     if (value == 1000) { pages[slot] = pages[slot] >= 8 ? pages[slot] - 8 : 0; StoredBansMenu(caller); }
     else if (value == 1001) { pages[slot] += 8; StoredBansMenu(caller); }
     else if (value >= 0 && value < 8 && accounts[slot][value][0]) UnbanAccount(caller, accounts[slot][value]);
+}
+
+public void BackToBanDuration(Player caller)
+{
+    BanMenu(caller, "");
 }

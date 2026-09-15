@@ -32,7 +32,7 @@ public:
     void OutputCell(int index, Cell value) const;
     void OutputArray(int index, int capacity, const std::vector<Cell>& values) const;
     std::string Format(int index) const;
-    SourcePawn::IPluginFunction* Callback(int index) const;
+    SourcePawn::IPluginFunction* Callback(int index, bool optional = false) const;
 private:
     SourcePawn::IPluginContext& context_;
     const Cell* values_;

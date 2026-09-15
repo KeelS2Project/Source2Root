@@ -78,6 +78,15 @@ int main(int argc,char** argv) {
     run(3,"/restart 60",sr::Origin::SilentChat); single(3,"60 seconds"); Require(h.restarts.back()==60,"silent restart maximum");
     h.restart_result=KEEL_RESULT_UNSUPPORTED; run(3,"sr_restart 5"); single(3,"unavailable on this game host"); h.restart_result=KEEL_RESULT_OK;
     std::ofstream(allowed)<<"de_mirage\n"; auto changes=h.changes.size(); run(3,"sr_map de_dust2"); single(3,"not allowed"); Require(h.changes.size()==changes,"current allowlist enforced");
+    run(3,"sr_admin"); select(3);
+    Require(app.MenuInput(h.players.at(3),app.CurrentMenu(h.players.at(3)),sr::MenuInput::Back) &&
+        h.menu.find("Source2Root administration")!=std::string::npos && h.changes.size()==changes,
+        "map menu returns to administration without changing map");
+    select(4);
+    const auto restart_count = h.restarts.size();
+    Require(app.MenuInput(h.players.at(3),app.CurrentMenu(h.players.at(3)),sr::MenuInput::Back) &&
+        h.menu.find("Source2Root administration")!=std::string::npos && h.restarts.size()==restart_count,
+        "restart choices return without requesting a restart");
     run(3,"sr_admin"); select(3); Require(h.menu.find("de_mirage")!=std::string::npos && h.menu.find("de_dust2")==std::string::npos,"map menu uses allowlist");
     std::ofstream(allowed)<<"de_dust2\n"; select(0); single(3,"not allowed"); Require(h.changes.size()==changes,"selection rechecks changed allowlist by map name");
     run(3,"sr_admin"); select(3); std::ofstream(admins)<<"\"Admins\" {}"; app.ReloadPermissions();

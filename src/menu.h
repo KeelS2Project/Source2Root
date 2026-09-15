@@ -33,7 +33,7 @@ public:
     std::vector<MenuItem> items;
     std::size_t selected = 0;
     MenuAction Input(MenuInput input);
-    std::string Html() const;
+    std::string Html(bool has_parent = false) const;
     static std::string Escape(const std::string& text);
 };
 

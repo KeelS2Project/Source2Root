@@ -128,6 +128,11 @@ int main(int argc, char** argv) {
     Require(app->Unload("moderation"),"unload enforcement"); ++host.players.at(6).connection; host.Clear(); tick(5); Require(host.kicks.empty(),"unloaded moderation owns no enforcement callback");
     Require(app->Load(install("moderation")),"reload moderation"); tick(2); Require(host.kicks.size()==1,"reloaded plugin enforces persisted ban");
     run(-1,"sr_unban [U:1:126]"); host.immediate=true; restore();
+    run(3,"sr_admin"); select(4); select(1);
+    Require(input(sr::MenuInput::Back) && host.menu.find("Ban duration")!=std::string::npos && host.kicks.empty(),
+        "ban target selection returns to duration without banning anyone");
+    Require(input(sr::MenuInput::Back) && host.menu.find("Source2Root administration")!=std::string::npos && host.kicks.empty(),
+        "ban duration returns to administration");
     run(3,"sr_admin"); select(3); Require(host.menu.find("Kick a player")!=std::string::npos,"admin routes kick menu with absent slap plugin");
     ++host.players.at(6).connection; select(3); single(3,"Player is no longer available"); Require(host.kicks.empty(),"stale kick menu cannot target replacement");
     run(3,"sr_admin"); select(4); select(1); select(3); single(3,"Banned 76561197960265854 for 30 minutes"); Require(host.kicks.size()==1,"ban menu duration and stable target");

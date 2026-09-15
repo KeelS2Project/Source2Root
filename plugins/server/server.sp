@@ -138,7 +138,7 @@ void MapsMenu(Player caller)
     }
     if (!installed) { ReplyToCommand(caller, "No installed maps from the configured list are available. Use sr_map <map> or update the map list."); return; }
     if (pages[slot] >= installed) pages[slot] = ((installed - 1) / 8) * 8;
-    Menu menu = CreateMenu("Change map", "admin.changemap", MapSelected);
+    Menu menu = CreateMenu("Change map", "admin.changemap", MapSelected, BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     for (int i = 0; i < 8; i++)
     {
@@ -177,7 +177,7 @@ public void RestartMenu(Player caller, const char[] arguments)
 {
     if (!Ready(caller, arguments, "admin.restart", "Usage: sr_restart [seconds]")) return;
     if (caller == NoPlayer) { ReplyToCommand(caller, "Use sr_restart [seconds] in the server console."); return; }
-    Menu menu = CreateMenu("Restart round", "admin.restart", RestartSelected);
+    Menu menu = CreateMenu("Restart round", "admin.restart", RestartSelected, BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     int delays[] = {1, 5, 10, 30, 60};
     for (int i = 0; i < sizeof(delays); i++)

@@ -94,6 +94,9 @@ int main(int argc,char** argv) {
     run(3,"sr_comms_owner #73 m"); run(3,"sr_unmute #73"); single(3,"another plugin still restricts voice"); Require(h.messages.size()==1 && !h.Read(3,6),"unmute does not claim another owner's restriction was lifted");
     run(3,"sr_comms_owner #73 g"); run(3,"sr_ungag #73"); single(3,"another plugin still restricts chat");
     Require(app.Unload("communications_owner") && h.Read(3,6) && !run(6,"released",sr::Origin::PublicChat),"owner unload restores its voice and chat");
+    run(3,"sr_admin"); select(3);
+    Require(input(sr::MenuInput::Back) && h.menu.find("Source2Root administration")!=std::string::npos,
+        "communications menu returns to administration");
     run(3,"sr_admin"); select(3); Require(h.menu.find("Mute a player")!=std::string::npos,"main menu routes mute");
     ++h.players.at(6).connection; select(3); single(3,"Player is no longer available"); Require(h.Read(3,6),"stale menu does not mute replacement");
     run(3,"sr_admin"); select(5); select(3); single(3,"Gagged Kiddo");

@@ -57,7 +57,7 @@ std::string Menu::Escape(const std::string& text) {
     return result;
 }
 
-std::string Menu::Html() const {
+std::string Menu::Html(bool has_parent) const {
     const auto page = selected / ItemsPerPage;
     const auto pages = std::max(std::size_t{1}, (items.size() + ItemsPerPage - 1) / ItemsPerPage);
     std::string html = "<font color='#78DCC8'>" + Escape(title) + " | Page " +
@@ -69,7 +69,9 @@ std::string Menu::Html() const {
         html += i == selected ? "&gt; " : "  ";
         html += Escape(items[i].text) + "</font><br>";
     }
-    return html + "<font color='#BBBBBB'>Forward/Back: move | Use: select<br>Reload: back/close</font>";
+    html += "<font color='#BBBBBB'>Forward/Back: move | Use: select<br>Reload: ";
+    html += has_parent ? "parent menu" : page ? "previous page" : "close";
+    return html + "</font>";
 }
 
 }

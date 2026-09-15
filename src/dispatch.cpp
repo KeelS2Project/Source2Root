@@ -145,7 +145,7 @@ void Foundation::Tick(Clock::time_point now) {
         if (result != KEEL_RESULT_OK) continue;
         const auto& menu = std::get<ScriptMenu>(handles_.Get(display.menu, display.script->owner, MenuType));
         if (!permissions_.Allows(current, menu.menu.permission) ||
-            host_.RenderMenu(current, menu.menu.Html(),
+            host_.RenderMenu(current, menu.menu.Html(menu.back != nullptr),
                 static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(display.expires - now_).count())) != KEEL_RESULT_OK) {
             display.expires = now_;
             CloseDisplay(slot);
@@ -247,6 +247,12 @@ bool Foundation::MenuInput(const Player& player, std::uint64_t session, sr::Menu
     auto& menu = std::get<ScriptMenu>(handles_.Get(display.menu, display.script->owner, MenuType));
     if (!Allowed(*display.script, display.player_handle, menu.menu.permission)) { CloseDisplay(player.slot); return false; }
     found->second.expires = display.expires = now_ + display.timeout;
+    if (input == sr::MenuInput::Back && menu.back) {
+        auto* callback = menu.back;
+        found->second.expires = now_;
+        if (!CloseDisplay(player.slot)) return false;
+        return Invoke(*display.script, callback, {display.player_handle});
+    }
     const auto action = menu.menu.Input(input);
     if (action == MenuAction::Cancelled) return CloseDisplay(player.slot);
     if (action == MenuAction::Selected) {
@@ -257,7 +263,7 @@ bool Foundation::MenuInput(const Player& player, std::uint64_t session, sr::Menu
         return Invoke(*display.script, callback, {display.player_handle, selected});
     }
     if (action == MenuAction::Changed) {
-        if (host_.RenderMenu(player, menu.menu.Html(),
+        if (host_.RenderMenu(player, menu.menu.Html(menu.back != nullptr),
             static_cast<int>(std::chrono::ceil<std::chrono::milliseconds>(display.expires - now_).count())) == KEEL_RESULT_OK) return true;
         if (CurrentMenu(player) == session) {
             displays_.at(player.slot).expires = now_;

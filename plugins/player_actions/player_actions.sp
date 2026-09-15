@@ -123,7 +123,7 @@ void TargetsMenu(Player caller, bool slap, int damage)
     if (slap) Format(title, sizeof(title), "Slap a player (%d damage)", damage);
     else Format(title, sizeof(title), "Slay a player");
     Format(permission, sizeof(permission), slap ? "admin.slap" : "admin.slay");
-    Menu menu = CreateMenu(title, permission, slap ? SlapSelected : SlaySelected);
+    Menu menu = CreateMenu(title, permission, slap ? SlapSelected : SlaySelected, slap ? BackToSlapDamage : BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     int added;
     for (int i = 0; i < count; i++)
@@ -146,7 +146,7 @@ void TargetsMenu(Player caller, bool slap, int damage)
 public void SlapMenu(Player caller, const char[] arguments)
 {
     if (!Ready(caller, arguments, "admin.slap", "Usage: sr_slap <target> [damage]")) return;
-    Menu menu = CreateMenu("Slap damage", "admin.slap", DamageSelected);
+    Menu menu = CreateMenu("Slap damage", "admin.slap", DamageSelected, BackToAdministration);
     if (menu == NoMenu) { Failure(caller); return; }
     int amounts[] = {0, 5, 10, 25, 50, 100, 1000};
     for (int i = 0; i < sizeof(amounts); i++)
@@ -182,4 +182,9 @@ public void SlaySelected(Player caller, int item)
     Player targets[1];
     targets[0] = view_as<Player>(item);
     Apply(caller, targets, 1, false, 0);
+}
+
+public void BackToSlapDamage(Player caller)
+{
+    SlapMenu(caller, "");
 }
