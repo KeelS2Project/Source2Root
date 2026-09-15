@@ -62,6 +62,8 @@ int main(int argc, char** argv) {
     Require(runtime.Invoke("hello", event, {}, "round_start", value), "real event callback");
     hello.reset();
     auto faults = runtime.Load(argv[3]);
+    Require(runtime.Invoke("faults", faults->GetFunctionByName("ReferenceValues"), {}, nullptr, value) && value == 42,
+            "debug metadata and write-back for integer, Boolean and enum reference arguments");
     runtime.Bind(*faults, "TestArraySum", 2, [](const sr::Arguments& args) {
         const auto values = args.Array(1, args.Int(2));
         return std::accumulate(values.begin(), values.end(), sr::Cell{0});

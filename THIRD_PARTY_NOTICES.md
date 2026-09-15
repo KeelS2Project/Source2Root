@@ -4,7 +4,7 @@ Original Source2Root sources are Apache-2.0 (see LICENSE). Dependencies are
 acquired at revisions in `dependencies.lock.json` and retain their own notices.
 
 * KeelS2 SDK/runtime: Apache-2.0, including its shipped third-party notices.
-* SourcePawn 1.12: compiler files include the CompuPhase zlib-style permission
+* SourcePawn 1.13: compiler files include the CompuPhase zlib-style permission
   notice and other per-file notices; AMTL uses BSD-3-Clause. VM and API files
   carry GPL-3.0 or GPL-3.0-or-later notices, some with the Valve linking exception.
   Preserve the exact per-file terms. The repository-level LICENSE.txt is an overview,

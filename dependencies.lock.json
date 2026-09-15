@@ -20,11 +20,11 @@
   },
   "sourcepawn": {
     "repository": "https://github.com/alliedmodders/sourcepawn.git",
-    "revision": "11b22edb634b9764d19fd28699e03289cfd18520",
-    "version": "1.12",
-    "release_provenance": "SourceMod 1.12.0.7253 sourcepawn submodule",
+    "revision": "27a5946695defdfda763a8d7d3c9063fefc1ad61",
+    "version": "1.13",
+    "release_provenance": "Pinned upstream snapshot including reference-argument RTTI validation fix",
     "mode": "x64 interpreter",
-    "amtl_revision": "2d3b1a3378a3728637f26660c9ffc2df3189cf62",
+    "amtl_revision": "ac9ed94208f06bfe1a2132d54fef4bd4ddaf3395",
     "googletest_revision": "a651a4d44e65b749467fa3dddf93819a22f0cc4a"
   },
   "ambuild": {

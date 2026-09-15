@@ -2,6 +2,22 @@
 native int TestArraySum(const int[] values, int count);
 native int TestNativeDelay();
 
+void ChangeReferences(int& value, bool& flag, Player& player)
+{
+    value += 2;
+    flag = !flag;
+    player = view_as<Player>(42);
+}
+
+public int ReferenceValues()
+{
+    int value = 40;
+    bool flag = false;
+    Player player = NoPlayer;
+    ChangeReferences(value, flag, player);
+    return value == 42 && flag && view_as<int>(player) == 42 ? 42 : 0;
+}
+
 public int ArraySum()
 {
     int values[] = { 7, 8, 9 };
