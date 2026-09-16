@@ -2,7 +2,7 @@
   "schema": 1,
   "keels2": {
     "repository": "https://github.com/KeelS2Project/KeelS2.git",
-    "revision": "6e7b4a5c8039654695391699fe7ef3a08c5bf5bb",
+    "revision": "30a7a271b4c6ad33cdd9bdd739c8c1cd62c473b7",
     "version": "1.0.0",
     "plugin_abi": 4,
     "manifest_version": 1,
