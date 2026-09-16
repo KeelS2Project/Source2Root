@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <cstdlib>
 
 namespace {
 struct Command {
@@ -25,6 +26,32 @@ struct Command {
     }
 };
 static_assert(offsetof(Command, words) == sizeof(CCommand));
+
+class Cvar {
+public:
+    virtual void Slot00() { std::abort(); }
+    virtual void Slot01() { std::abort(); }
+    virtual void Slot02() { std::abort(); }
+    virtual void Slot03() { std::abort(); }
+    virtual void Slot04() { std::abort(); }
+    virtual void Slot05() { std::abort(); }
+    virtual void Slot06() { std::abort(); }
+    virtual void Slot07() { std::abort(); }
+    virtual void Slot08() { std::abort(); }
+    virtual void Slot09() { std::abort(); }
+    virtual void Slot10() { std::abort(); }
+    virtual void Slot11() { std::abort(); }
+    virtual void Slot12() { std::abort(); }
+    virtual void Slot13() { std::abort(); }
+    virtual void Slot14() { std::abort(); }
+    virtual void Slot15() { std::abort(); }
+    virtual void Slot16() { std::abort(); }
+    virtual void Slot17() { std::abort(); }
+    virtual void Slot18() { std::abort(); }
+    virtual void Slot19() { std::abort(); }
+    virtual void DispatchConCommand(ConCommandRef, const CCommandContext&, const CCommand&) { ++calls; }
+    unsigned calls = 0;
+} cvar;
 
 }
 extern "C" void SrFixtureWithArguments(uint32_t count, const char* const* values, int slot,
@@ -48,4 +75,17 @@ extern "C" void SrFixtureWithCommand(const char* text, int slot, SrFixtureDispat
 }
 extern "C" int SrFixtureCaller(const void* context) {
     return static_cast<const CCommandContext*>(context)->GetPlayerSlot().Get();
+}
+extern "C" void* SrFixtureCvar() { return &cvar; }
+extern "C" bool SrFixtureDispatchConCommand(uint32_t count, const char* const* values, int slot) {
+    const auto before = cvar.calls;
+    SrFixtureWithArguments(count, values, slot, [](void*, const void* context, const void* command,
+        uint32_t, const char* const*) {
+        auto* table = *reinterpret_cast<void***>(&cvar);
+        using Dispatch = void (*)(Cvar*, ConCommandRef, const CCommandContext&, const CCommand&);
+        const auto dispatch = reinterpret_cast<Dispatch>(static_cast<void* volatile*>(table)[20]);
+        dispatch(&cvar, ConCommandRef(1, 1), *static_cast<const CCommandContext*>(context),
+            *static_cast<const CCommand*>(command));
+    }, nullptr);
+    return cvar.calls != before;
 }

@@ -123,6 +123,7 @@ int main(int argc, char** argv) {
         auto cvar_equals = adapter.Get<bool (*)(const char*, const char*)>("SrFixtureConVarEquals");
         auto chat = adapter.Get<const char* (*)()>("SrFixtureChatOutput");
         auto say = adapter.Get<bool (*)(const char*, int)>("SrFixtureChat");
+        auto chat_command = adapter.Get<bool (*)(const char*, const char*, int)>("SrFixtureChatCommand");
         auto reconnect = adapter.Get<void (*)()>("SrFixtureReconnect");
         auto actions = adapter.Get<unsigned (*)(KeelPlayerAction*)>("SrFixturePlayerActions");
         auto action_state = adapter.Get<void (*)(unsigned, unsigned, bool)>("SrFixtureActionState");
@@ -218,6 +219,9 @@ int main(int argc, char** argv) {
         run("keel plugins unload 2");
         run("keel plugins pause 1");
         Check(contains("plugin paused: [01] Source2Root"), "native Source2Root really enters paused state");
+        const auto paused_chat = std::string(chat());
+        Check(say("/unknown", 3) && std::string(chat()) == paused_chat,
+              "native pause disables the engine chat hook without retaining callbacks");
         Check(set_cvar("sr_show_activity", "9") && set_cvar("sr_chat_public_trigger", "/") && set_cvar("sr_chat_silent_trigger", "!"),
               "operator changes core settings while native plugin callbacks are paused");
         run("keel plugins resume 1");
@@ -328,9 +332,9 @@ int main(int argc, char** argv) {
         run("sr_unmute [U:1:123]");
         Check(read_listening(3, 3), "unmute restores the latest intercepted request");
         run("sr_gag [U:1:123]");
-        Check(!say("ordinary gagged chat", 3), "native client-command route suppresses ordinary gagged chat");
+        Check(!say("ordinary gagged chat", 3), "engine ConCommand route suppresses ordinary gagged chat");
         run("sr_ungag [U:1:123]");
-        Check(say("ordinary visible chat", 3), "native client-command route allows ungagged chat");
+        Check(say("ordinary visible chat", 3), "engine ConCommand route allows ungagged chat");
         run("sr_mute [U:1:123]");
         fail_listening(true);
         run("sr plugins unload communications");
@@ -507,6 +511,15 @@ int main(int argc, char** argv) {
               "unknown silent command is suppressed and replied to privately");
         std::ofstream(script / "configs/admins.cfg") << permissions;
         run("sr_reloadadmins");
+        const auto route_answers = answers();
+        Check(!chat_command("say_team", "/hello", 3) && answers() == route_answers + 1,
+              "team chat uses the engine dispatch hook and suppresses silent commands");
+        Check(!chat_command("SAY", "/hello", 3) && answers() == route_answers + 2,
+              "case-insensitive engine chat command executes once");
+        const auto passthrough_chat = std::string(chat());
+        Check(chat_command("say", "/hello", -1) && chat_command("echo", "/hello", 3) &&
+              std::string(chat()) == passthrough_chat && answers() == route_answers + 2,
+              "server-origin chat and unrelated engine commands are not script invocations");
         const auto custom_answers = answers();
         Check(set_cvar("sr_chat_public_trigger", "!!"), "direct engine ConVar update");
         run("sr config sr_chat_silent_trigger ??");
@@ -599,6 +612,9 @@ int main(int argc, char** argv) {
         fail_listening(false);
         run("keel plugins unload 1");
         Check(read_listening(3, 3), "native unload retry restores voice during unload preparation");
+        const auto unloaded_chat = std::string(chat());
+        Check(say("/unknown", 3) && std::string(chat()) == unloaded_chat,
+              "native unload removes the engine chat hook");
         Check(count() == 1 && cvars() == 0, "module cleanup removes its commands and ConVars");
         std::ofstream(core_cfg) << "sr_show_activity 9\nsr_chat_public_trigger +\nsr_chat_silent_trigger ##\n";
         Copy(argv[5], plugins / ("sr_example" + extension));

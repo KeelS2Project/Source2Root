@@ -81,6 +81,12 @@ public:
     void Stop() noexcept override { thread = {}; commands.clear(); variables.clear(); }
     bool IsGameThread() const noexcept override { return thread == std::this_thread::get_id(); }
     KeelResult QueryInterface(KeelSource2Capability capability, KeelSource2InterfaceInfo& info) const noexcept override {
+        if (capability == KEELS2_SOURCE2_CAPABILITY_CVAR) {
+            info = {sizeof(info), capability, KEELS2_SOURCE2_FACTORY_ENGINE, KEELS2_SOURCE2_OWNERSHIP_BORROWED,
+                KEELS2_SOURCE2_LIFETIME_HOST, 0, SrFixtureCvar(), "VEngineCvar007",
+                "sr_host_adapter", "headless", "source2root-headless-fixture"};
+            return KEEL_RESULT_OK;
+        }
         if (capability == KEELS2_SOURCE2_CAPABILITY_GAME_EVENT_MANAGER) {
             auto* manager = SrNetworkGameEventManager();
             if (!manager) return KEEL_RESULT_NOT_READY;
@@ -238,19 +244,11 @@ public:
         }
         return false;
     }
-    bool Chat(const char* text, int slot) {
-        if (!source) return true;
-        struct ChatState { Adapter& adapter; int slot; bool allowed = true; } state{*this, slot};
-        const char* arguments[] = {"say", text};
-        SrFixtureWithArguments(2, arguments, slot, [](void* data, const void*, const void* command,
-                                                    uint32_t, const char* const*) {
-            auto& state = *static_cast<ChatState*>(data);
-            const KeelSource2ClientCommand payload{sizeof(payload), state.slot, command};
-            KeelSource2CallbackEvent event{sizeof(event), KEELS2_SOURCE2_CLIENT_COMMAND, sizeof(payload), 0, &payload};
-            state.allowed = state.adapter.source(event, state.adapter.source_data) == KEEL_TRUE;
-        }, &state);
-        if (state.allowed) ++publications;
-        return state.allowed;
+    bool Chat(const char* text, int slot, const char* verb = "say") {
+        const char* arguments[] = {verb, text};
+        const bool allowed = SrFixtureDispatchConCommand(2, arguments, slot);
+        if (allowed) ++publications;
+        return allowed;
     }
     void Frame() {
         auto found = lifecycle.find(KEELS2_LIFECYCLE_GAME_FRAME);
@@ -367,6 +365,9 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureEntityError(unsigned result)
 extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureEntityReads() { return active ? active->entity_reads : 0; }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureChat(const char* text, int slot) { return active && active->Chat(text, slot); }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureChatCommand(const char* verb, const char* text, int slot) {
+    return active && active->Chat(text, slot, verb);
+}
 extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureReconnect() { if (active) ++active->user_id; }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(

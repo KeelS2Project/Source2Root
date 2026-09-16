@@ -9,6 +9,7 @@
 #include <eiface.h>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <fstream>
 #include <optional>
@@ -70,6 +71,9 @@ public:
                 !CreateCommand("sr_menu", "Menu input: up/down/select/back [session]", &Source2Root::MenuCommand,
                     FCVAR_CLIENT_CAN_EXECUTE | FCVAR_GAMEDLL))
                 throw std::runtime_error(LastError());
+            auto* cvars = GetCVarSystem<ICvar>();
+            if (!cvars || !HookPre(cvars, &ICvar::DispatchConCommand, &Source2Root::ChatCommand))
+                throw std::runtime_error("could not intercept client chat: " + std::string(LastError()));
             voice_engine_ = GetEngineInterface<IVEngineServer2>(INTERFACEVERSION_VENGINESERVER);
             if (voice_engine_ && !HookPre(voice_engine_, &IVEngineServer2::SetClientListening, &Source2Root::Listening, 1000))
                 throw std::runtime_error(LastError());
@@ -140,12 +144,15 @@ public:
     void OnLevelShutdown() override {
         if (foundation_) foundation_->MapChanged();
     }
-    bool OnClientCommand(CPlayerSlot slot, const CCommand& command) override {
-        if (!foundation_ || command.ArgC() < 2 ||
-            (std::string(command[0]) != "say" && std::string(command[0]) != "say_team")) return true;
+    Action ChatCommand(ConCommandRef, const CCommandContext& context, const CCommand& command) {
+        const auto slot = context.GetPlayerSlot();
+        if (!foundation_ || !slot.IsValid() || command.ArgC() < 2) return PLUGIN_CONTINUE;
+        std::string name = command[0];
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+        if (name != "say" && name != "say_team") return PLUGIN_CONTINUE;
         const std::string text = command.ArgC() == 2 ? command[1] : command.ArgS();
-        return !foundation_->Dispatch(text.starts_with('/') ? sr::Origin::SilentChat : sr::Origin::PublicChat,
-                                      slot.Get(), text);
+        return foundation_->Dispatch(sr::Origin::PublicChat, slot.Get(), text)
+            ? PLUGIN_SUPERSEDE : PLUGIN_CONTINUE;
     }
     KeelResult Lookup(int slot, sr::Player& result) override {
         PlayerInfo player;

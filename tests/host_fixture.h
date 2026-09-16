@@ -5,6 +5,8 @@ using SrFixtureDispatch = void (*)(void*, const void*, const void*, uint32_t, co
 extern "C" void SrFixtureWithCommand(const char*, int, SrFixtureDispatch, void*);
 extern "C" void SrFixtureWithArguments(uint32_t, const char* const*, int, SrFixtureDispatch, void*);
 extern "C" int SrFixtureCaller(const void*);
+extern "C" void* SrFixtureCvar();
+extern "C" bool SrFixtureDispatchConCommand(uint32_t, const char* const*, int);
 
 extern "C" void* SrFixtureEngine(void (*disconnect)(int, unsigned, const char*, void*), void* data);
 
