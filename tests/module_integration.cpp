@@ -186,6 +186,7 @@ int main(int argc, char** argv) {
 #if defined(SR_PREFS_TEST)
         if (argc == 12 && std::string(argv[10]) == "clientprefs") {
             auto authentication = adapter.Get<void (*)(bool, bool)>("SrFixtureAuthentication");
+            auto player_lookup = adapter.Get<void (*)(KeelResult)>("SrFixturePlayerLookup");
             auto occurrences = [&](const char* text) {
                 const std::string log = messages();
                 std::size_t offset = 0;
@@ -207,9 +208,49 @@ int main(int argc, char** argv) {
             await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 1; });
             run("keel plugins unload 2");
             Check(contains("plugin unload is blocked"), "preferences provider retained while scripts use cookies");
+            auto press = [&](std::uint64_t button) {
+                input_state(0, 1, KEEL_RESULT_OK); frame();
+                input_state(button, 1, KEEL_RESULT_OK); frame();
+            };
+            unsigned menu_saved = 0;
+            for (int type = 0; type < 4; ++type) for (int enabled = 1; enabled >= 0; --enabled) {
+                run("sr_prefs_type " + std::to_string(type));
+                run("sr_prefs_menu");
+                const std::string root_menu = menu_text();
+                Check(root_menu.find("Music setting") != std::string::npos && root_menu.find("[read only]") != std::string::npos &&
+                    root_menu.find("internal") == std::string::npos && root_menu.find("script-private") == std::string::npos,
+                    "shared menu shows public/protected preferences and hides private values");
+                press(KEELS2_BUTTON_USE);
+                Check(std::string(menu_text()).find(type < 2 ? "Yes" : "On") != std::string::npos &&
+                    std::string(menu_text()).find("Back to settings") != std::string::npos, "prefab opens correct choice submenu");
+                if (!enabled) press(KEELS2_BUTTON_BACK);
+                press(KEELS2_BUTTON_USE);
+                Check(std::string(menu_text()).find("Player preferences") != std::string::npos, "selection returns to shared menu");
+                run("sr_prefs_observe");
+                ++menu_saved;
+                await([&] { frame(); return occurrences("PREFS_MENU_SAVED") == menu_saved; });
+                const auto expected = type == 0 ? (enabled ? "yes" : "no") : type == 2 ? (enabled ? "on" : "off") : (enabled ? "1" : "0");
+                Check(contains(("PREFS_MENU_VALUE_" + std::to_string(type) + ":" + expected).c_str()), "selected prefab value is committed and read by compiled script");
+            }
+            run("sr_prefs_menu"); press(KEELS2_BUTTON_USE);
+            press(KEELS2_BUTTON_BACK); press(KEELS2_BUTTON_BACK); press(KEELS2_BUTTON_USE);
+            Check(std::string(menu_text()).find("Player preferences") != std::string::npos, "explicit submenu Back returns without changing value");
+            press(KEELS2_BUTTON_RELOAD);
+            Check(!*menu_text(), "shared settings menu closes on Reload");
+            run("sr_prefs_menu"); press(KEELS2_BUTTON_USE); run("sr_prefs_drop"); press(KEELS2_BUTTON_USE);
+            Check(!*menu_text(), "closed prefab cancels an existing submenu before a stale selection writes");
+            run("sr_prefs_type 0"); run("sr_prefs_menu");
+            player_lookup(KEEL_RESULT_ENGINE_FAILURE); frame(); run("sr_prefs_close"); frame();
+            player_lookup(KEEL_RESULT_OK); frame();
+            Check(!*menu_text(), "menu callback storage survives resource close while host cleanup retries");
+            run("sr_prefs_observe"); ++menu_saved;
+            await([&] { frame(); return occurrences("PREFS_MENU_SAVED") == menu_saved; });
+            run("sr_prefs_type 0"); run("sr_prefs_menu"); run("sr plugins pause hello"); frame();
+            Check(!*menu_text(), "pausing the display owner closes its native preferences menu");
+            run("sr plugins resume hello"); run("sr_prefs_menu");
             run("sr_prefs_pending");
             authentication(false, false); frame();
-            Check(!contains("PREFS_UNEXPECTED_CALLBACK"), "lost authentication cancels player waits");
+            Check(!contains("PREFS_UNEXPECTED_CALLBACK") && !*menu_text(), "lost authentication cancels player waits and menu");
             authentication(true, false); frame();
             run("sr_prefs_pending");
             authentication(true, true); frame();

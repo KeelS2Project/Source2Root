@@ -1,4 +1,5 @@
 #include "service.h"
+#include "menu.h"
 #include <source2root/extension.hpp>
 
 namespace {
@@ -20,13 +21,14 @@ public:
             players_.clear(); service_->Sync({});
         }
         service_->Pump();
+        TickMenus();
         // A script callback can add another wait; do not iterate a live vector.
         const auto waiting = waiting_;
         for (const auto& weak : waiting) if (auto request = weak.lock(); request && !request->done) Complete(*request);
         std::erase_if(waiting_, [](const auto& weak) { const auto value = weak.lock(); return !value || value->done; });
     }
 private:
-    static constexpr unsigned CookieType = 1, RequestType = 2;
+    static constexpr unsigned CookieType = 1, RequestType = 2, PrefabType = 3, MenuType = 4;
     using CookieRef = std::shared_ptr<prefs::Cookie>;
     enum class WaitFor { Catalog, Cookie, Cache, Save };
     struct Request {
@@ -45,6 +47,24 @@ private:
     std::vector<std::weak_ptr<Request>> waiting_;
     bool snapshot_failed_ = false;
     bool sync_error_ = false;
+    struct MenuView {
+        prefs::Identity player;
+        std::uint64_t owner = 0;
+        SrMenuSession session = 0;
+        prefs::MenuPage page;
+        std::weak_ptr<prefs::Prefab> choice;
+        bool live = true, choosing = false;
+        int pending = -1;
+    };
+    struct MenuLease {
+        explicit MenuLease(std::shared_ptr<MenuView> value) : view(std::move(value)) {}
+        std::shared_ptr<MenuView> view;
+        ~MenuLease() { view->live = false; }
+    };
+    std::vector<std::weak_ptr<prefs::Prefab>> prefabs_;
+    // Callback user_data stays alive here until the host confirms closure,
+    // even if the script resource has already been destroyed.
+    std::vector<std::shared_ptr<MenuView>> menus_;
 
     bool OnExtensionStart() override {
         return RegisterNative("Prefs_RegisterCookie", 3, &ClientPreferences::Register)
@@ -68,9 +88,18 @@ private:
             && RegisterNative("Prefs_Retry", 1, &ClientPreferences::Retry)
             && RegisterNative("Prefs_UserCookieCount", 0, &ClientPreferences::UserCookieCount)
             && RegisterNative("Prefs_UserCookieName", 3, &ClientPreferences::UserCookieName)
-            && RegisterNative("Prefs_UserSet", 3, &ClientPreferences::UserSet);
+            && RegisterNative("Prefs_UserSet", 3, &ClientPreferences::UserSet)
+            && RegisterNative("Prefs_SetPrefabMenu", 3, &ClientPreferences::SetPrefab)
+            && RegisterNative("Prefs_ClosePrefabMenu", 1, &ClientPreferences::ClosePrefab)
+            && RegisterNative("Prefs_ShowMenu", 1, &ClientPreferences::ShowSettings)
+            && RegisterNative("Prefs_CloseMenu", 1, &ClientPreferences::CloseSettings)
+            && RegisterNative("Prefs_MenuOpen", 1, &ClientPreferences::MenuOpen);
     }
     bool PrepareExtensionUnload() override {
+        bool closed = true;
+        for (const auto& menu : menus_) { menu->live = false; if (!CloseView(*menu)) closed = false; }
+        if (!closed) return false;
+        menus_.clear();
         // Keep successful registration/catalog state after an unload refusal:
         // the provider may still be leased by scripts that continue running.
         return !service_ || service_->CanStop();
@@ -202,6 +231,117 @@ private:
     }
     std::int32_t UserSet(NativeCall& call) {
         return Invoke(call, [&] { service_->UserSet(Player(call), call.String(2), call.String(3), Now()); return 1; });
+    }
+    std::int32_t SetPrefab(NativeCall& call) {
+        return Invoke(call, [&] {
+            auto prefab = std::make_shared<prefs::Prefab>(prefs::Prefab{Cookie(call),
+                static_cast<prefs::PrefabType>(call.Int(2)), call.String(3), call.Owner()});
+            prefs::ValidatePrefab(*prefab);
+            std::erase_if(prefabs_, [](const auto& weak) { return weak.expired(); });
+            if (prefabs_.size() >= 256) throw prefs::Error("Preferences prefab limit (256) reached.");
+            prefabs_.push_back(prefab);
+            return call.Own(PrefabType, std::make_unique<std::shared_ptr<prefs::Prefab>>(prefab));
+        });
+    }
+    std::int32_t ClosePrefab(NativeCall& call) { call.Close(call.Int(1), PrefabType); return 1; }
+    bool CloseView(MenuView& view) {
+        if (!view.session) return true;
+        const auto status = CloseNativeMenu(view.session);
+        if (status != KEEL_RESULT_OK && status != KEEL_RESULT_NOT_FOUND) return false;
+        view.session = 0;
+        return true;
+    }
+    static void Selected(void* raw, const KeelPlayerConnection* player, std::int32_t item) noexcept {
+        auto* view = static_cast<MenuView*>(raw);
+        if (view && player && view->live && player->slot == view->player.slot && player->generation == view->player.connection)
+            view->pending = item; // Open submenus only after the host finishes closing this session.
+    }
+    void Display(MenuView& view, const std::string& title, const std::vector<SrMenuItem>& items) {
+        if (!CloseView(view)) throw prefs::Error("The previous settings menu is still closing.");
+        const KeelPlayerConnection connection{view.player.slot, 0, view.player.connection};
+        const SrMenuSpec spec{sizeof(spec), SR_EXTENSION_API_VERSION, title.c_str(), "", items.data(),
+            static_cast<std::uint32_t>(items.size()), 20000, &Selected, &view, nullptr, 0};
+        if (OpenNativeMenu(connection, spec, view.session) != KEEL_RESULT_OK) throw prefs::Error("The settings menu renderer is unavailable.");
+    }
+    std::vector<std::weak_ptr<prefs::Prefab>> ActivePrefabs() {
+        std::vector<std::weak_ptr<prefs::Prefab>> result;
+        std::erase_if(prefabs_, [](const auto& weak) { return weak.expired(); });
+        for (const auto& weak : prefabs_) if (auto prefab = weak.lock(); prefab && ConsumerStatus(prefab->owner) == KEEL_RESULT_OK)
+            result.push_back(prefab);
+        return result;
+    }
+    void RootMenu(MenuView& view, std::size_t page) {
+        view.page = prefs::BuildSettings(*service_, view.player, ActivePrefabs(), page);
+        std::vector<SrMenuItem> items;
+        for (const auto& row : view.page.rows) items.push_back({row.text.c_str(), row.enabled ? KEEL_TRUE : KEEL_FALSE});
+        view.choosing = false; view.choice.reset();
+        Display(view, view.page.title, items);
+    }
+    void ChoiceMenu(MenuView& view, const std::shared_ptr<prefs::Prefab>& prefab) {
+        prefs::ValidatePrefab(*prefab);
+        if (ConsumerStatus(prefab->owner) != KEEL_RESULT_OK) throw prefs::Error("The setting's plugin is not running.");
+        const auto yes = prefs::ChoiceLabel(prefab->type, true), no = prefs::ChoiceLabel(prefab->type, false);
+        view.choosing = true; view.choice = prefab;
+        Display(view, prefab->label, {{yes.c_str(), KEEL_TRUE}, {no.c_str(), KEEL_TRUE}, {"Back to settings", KEEL_TRUE}});
+    }
+    std::int32_t ShowSettings(NativeCall& call) {
+        return Invoke(call, [&] {
+            if (ConsumerStatus(call.Owner()) != KEEL_RESULT_OK) throw prefs::Error("Show settings from a running script callback.");
+            const auto player = Player(call);
+            for (const auto& menu : menus_) if (menu->player.slot == player.slot) {
+                menu->live = false;
+                if (!CloseView(*menu)) throw prefs::Error("The previous settings menu is still closing.");
+            }
+            std::erase_if(menus_, [](const auto& menu) { return !menu->live && !menu->session; });
+            if (menus_.size() >= 128) throw prefs::Error("Preferences menu limit (128) reached.");
+            auto view = std::make_shared<MenuView>();
+            view->player = player; view->owner = call.Owner();
+            menus_.push_back(view);
+            const auto handle = call.Own(MenuType, std::make_unique<MenuLease>(view));
+            try { RootMenu(*view, 0); }
+            catch (...) { call.Close(handle, MenuType); throw; }
+            return handle;
+        });
+    }
+    std::int32_t CloseSettings(NativeCall& call) { call.Close(call.Int(1), MenuType); return 1; }
+    std::int32_t MenuOpen(NativeCall& call) {
+        const auto& view = *call.Resource<MenuLease>(call.Int(1), MenuType).view;
+        return view.live && view.session && NativeMenuStatus(view.session) == KEEL_RESULT_OK ? 1 : 0;
+    }
+    bool PrefabLive(const std::weak_ptr<prefs::Prefab>& weak) {
+        const auto prefab = weak.lock();
+        return prefab && prefab->cookie->state == prefs::State::Ready && ConsumerStatus(prefab->owner) == KEEL_RESULT_OK;
+    }
+    void TickMenus() {
+        for (const auto& menu : menus_) {
+            auto& view = *menu;
+            if (std::find(players_.begin(), players_.end(), view.player) == players_.end() || ConsumerStatus(view.owner) != KEEL_RESULT_OK)
+                view.live = false;
+            if (view.choosing && !PrefabLive(view.choice)) view.live = false;
+            if (!view.choosing) for (const auto& row : view.page.rows)
+                if (row.enabled && row.page < 0 && !PrefabLive(row.prefab)) view.live = false;
+            if (view.live && view.pending >= 0) {
+                if (!CloseView(view)) continue;
+                const auto selected = std::exchange(view.pending, -1);
+                try {
+                    if (view.choosing) {
+                        const auto prefab = view.choice.lock();
+                        if (selected < 2 && prefab)
+                            service_->UserSet(view.player, prefab->cookie->definition.name, prefs::ChoiceValue(prefab->type, selected == 0), Now());
+                        else if (selected != 2) throw prefs::Error("Invalid preference selection.");
+                        RootMenu(view, view.page.page);
+                    } else {
+                        if (static_cast<std::size_t>(selected) >= view.page.rows.size()) throw prefs::Error("Invalid preference selection.");
+                        const auto row = view.page.rows[selected];
+                        if (row.page >= 0) RootMenu(view, static_cast<std::size_t>(row.page));
+                        else if (auto prefab = row.prefab.lock(); row.enabled && prefab) ChoiceMenu(view, prefab);
+                        else throw prefs::Error("This preference is read only or no longer available.");
+                    }
+                } catch (const prefs::Error& error) { LogError("{}", error.what()); view.live = false; }
+            } else if (view.live && view.session && NativeMenuStatus(view.session) == KEEL_RESULT_NOT_FOUND) view.live = false;
+            if (!view.live) CloseView(view);
+        }
+        std::erase_if(menus_, [](const auto& menu) { return !menu->live && !menu->session; });
     }
 };
 }

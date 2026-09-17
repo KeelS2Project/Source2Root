@@ -101,6 +101,24 @@ protected:
         else if (result == KEEL_RESULT_OK) return KEEL_RESULT_ENGINE_FAILURE;
         return result;
     }
+    KeelResult OpenNativeMenu(const KeelPlayerConnection& player, SrMenuSpec spec, SrMenuSession& session) {
+        session = 0;
+        if (!api_ || !api_->open_menu) return KEEL_RESULT_NOT_READY;
+        spec.provider_service = service_.c_str(); spec.provider_version = version_;
+        return api_->open_menu(api_->context, HostContext().PluginHandle(), &player, &spec, &session);
+    }
+    KeelResult CloseNativeMenu(SrMenuSession session) {
+        if (!api_ || !api_->close_menu) return KEEL_RESULT_NOT_READY;
+        return api_->close_menu(api_->context, HostContext().PluginHandle(), session);
+    }
+    KeelResult NativeMenuStatus(SrMenuSession session) {
+        if (!native_api_ || !native_api_->menu_status) return KEEL_RESULT_NOT_READY;
+        return native_api_->menu_status(native_api_->context, HostContext().PluginHandle(), session);
+    }
+    KeelResult ConsumerStatus(std::uint64_t owner) {
+        if (!native_api_ || !native_api_->consumer_status) return KEEL_RESULT_NOT_READY;
+        return native_api_->consumer_status(native_api_->context, HostContext().PluginHandle(), owner);
+    }
 
     template <typename Owner, typename... Arguments>
     bool RegisterNative(const char* name, std::int32_t (Owner::*callback)(Arguments...)) {

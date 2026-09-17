@@ -16,7 +16,7 @@ class Host final : public sr::GameHost {
 public:
     sr::Player player{3, 10, 76561197960265851ULL, true, false, "Fixture player"};
     KeelResult lookup = KEEL_RESULT_OK;
-    bool fail_remove = false, fail_render = false, provider_available = true;
+    bool fail_remove = false, fail_render = false, fail_release = false, provider_available = true;
     unsigned replies = 0, renders = 0, leases = 0;
     std::function<void(const std::string&)> on_log;
     std::vector<std::string> logs;
@@ -56,6 +56,7 @@ public:
         ++leases; return KEEL_RESULT_OK;
     }
     KeelResult ReleaseProvider(const std::string&, unsigned) override {
+        if (fail_release) return KEEL_RESULT_BUSY;
         Require(leases != 0, "no extra provider release"); --leases; return KEEL_RESULT_OK;
     }
 };
@@ -412,6 +413,15 @@ int main(int argc, char** argv) {
             "transient native lookup retains provider and retry state");
     host.lookup = KEEL_RESULT_OK;
     Require(app.CloseNativeMenu(50, native_session) == KEEL_RESULT_OK && !host.leases, "native cleanup retry");
+    host.fail_render = host.fail_release = true;
+    Require(app.OpenNativeMenu(50, connection, native_spec, native_session) == KEEL_RESULT_ENGINE_FAILURE &&
+        native_session && host.leases == 1, "failed open returns retained cleanup session");
+    Require(app.NativeMenuStatus(50, native_session) == KEEL_RESULT_OK &&
+        app.NativeMenuStatus(51, native_session) == KEEL_RESULT_INVALID_ARGUMENT, "menu status checks ownership and retained cleanup");
+    Require(app.CloseNativeMenu(50, native_session) == KEEL_RESULT_BUSY, "failed release keeps callback data retained");
+    host.fail_render = host.fail_release = false;
+    Require(app.CloseNativeMenu(50, native_session) == KEEL_RESULT_OK && !host.leases &&
+        app.NativeMenuStatus(50, native_session) == KEEL_RESULT_NOT_FOUND, "failed-open cleanup recovers before user data can be released");
     Require(app.OpenNativeMenu(50, connection, native_spec, native_session) == KEEL_RESULT_OK, "native permission fixture");
     Write(root / "configs/admins.cfg", R"("Admins" {})");
     app.ReloadPermissions();

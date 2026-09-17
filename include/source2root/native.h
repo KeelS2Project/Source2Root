@@ -81,6 +81,12 @@ typedef struct SrNativeApi {
     /* Complete server-thread snapshot; no partial output on failure. At most
        128 players. These identities are not script Player handles. */
     KeelResult (*player_snapshot)(void*, SrPlayerIdentity* players, uint32_t capacity, uint32_t* count);
+    /* OK while a session is retained (including retryable close); NOT_FOUND
+       after closure. Wrong-owner sessions are refused. Server thread only. */
+    KeelResult (*menu_status)(void*, KeelPluginHandle owner, SrMenuSession session);
+    /* Status of a script generation using this provider: OK running, BUSY
+       loading/paused, NOT_FOUND retired. The generation is NativeCall.Owner. */
+    KeelResult (*consumer_status)(void*, KeelPluginHandle owner, uint64_t script_owner);
 } SrNativeApi;
 
 #ifdef __cplusplus

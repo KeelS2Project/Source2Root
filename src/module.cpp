@@ -68,7 +68,7 @@ public:
             if (services_.Publish(SR_EXTENSION_SERVICE, SR_EXTENSION_API_VERSION, &api_, publication_) != KEEL_RESULT_OK)
                 throw std::runtime_error("could not publish extension API");
             native_api_ = {sizeof(native_api_), SR_NATIVE_API_VERSION, this, &RegisterContextNative, &UnregisterNative,
-                &DeliverCallback, &CancelCallback, &PlayerSnapshot};
+                &DeliverCallback, &CancelCallback, &PlayerSnapshot, &MenuStatus, &ConsumerStatus};
             if (services_.Publish(SR_NATIVE_SERVICE, SR_NATIVE_API_VERSION, &native_api_, native_publication_) != KEEL_RESULT_OK)
                 throw std::runtime_error("could not publish native call API");
             if (!CreateCommand("sr", "Source2Root management", &Source2Root::Manage) ||
@@ -706,6 +706,12 @@ private:
     }
     static KeelResult CloseMenu(void* context, KeelPluginHandle owner, SrMenuSession session) {
         return Call(context, [&](auto& core) { return core.CloseNativeMenu(owner, session); }, true);
+    }
+    static KeelResult MenuStatus(void* context, KeelPluginHandle owner, SrMenuSession session) {
+        return Call(context, [&](auto& core) { return core.NativeMenuStatus(owner, session); }, true);
+    }
+    static KeelResult ConsumerStatus(void* context, KeelPluginHandle provider, std::uint64_t owner) {
+        return Call(context, [&](auto& core) { return core.NativeConsumerStatus(provider, owner); }, true);
     }
 };
 }

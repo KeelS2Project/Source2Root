@@ -113,9 +113,11 @@ public:
         const Cell* cells, std::uint32_t count, const char* text);
     KeelResult CancelCallback(KeelPluginHandle owner, SrCallback callback);
     KeelResult NativePlayerSnapshot(SrPlayerIdentity* players, std::uint32_t capacity, std::uint32_t* count);
+    KeelResult NativeConsumerStatus(KeelPluginHandle provider, std::uint64_t owner);
     KeelResult OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerConnection& player,
         const SrMenuSpec& spec, SrMenuSession& session);
     KeelResult CloseNativeMenu(KeelPluginHandle owner, SrMenuSession session);
+    KeelResult NativeMenuStatus(KeelPluginHandle owner, SrMenuSession session);
     const std::string& Error() const { return error_; }
 private:
     struct Command {

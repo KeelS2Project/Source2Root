@@ -3,12 +3,18 @@
 PrefCookie cookies[3];
 Player client;
 int registered;
+PrefMenuItem prefab;
+PrefMenu settings;
+int menuType;
 
 public bool OnPluginStart()
 {
     cookies[0] = Prefs_RegisterCookie("music", "Music preference", Pref_Public);
     cookies[1] = Prefs_RegisterCookie("rank", "Server-managed rank", Pref_Protected);
     cookies[2] = Prefs_RegisterCookie("internal", "Internal value", Pref_Private);
+    prefab = Prefs_SetPrefabMenu(cookies[0], Pref_YesNo, "Music setting");
+    if (!prefab || Prefs_SetPrefabMenu(cookies[1], Pref_YesNo, "Rank") ||
+        Prefs_SetPrefabMenu(cookies[2], Pref_YesNo, "Private")) return false;
     // Repeated close must release both token and wait bookkeeping immediately.
     for (int i = 0; i < 300; ++i) {
         PrefRequest canceled = Prefs_WhenCookieReady(cookies[0], Unexpected);
@@ -16,7 +22,10 @@ public bool OnPluginStart()
     }
     for (int i = 0; i < sizeof(cookies); ++i)
         if (!cookies[i] || !Prefs_WhenCookieReady(cookies[i], CookieReady, i)) return false;
-    return RegisterCommand("sr_prefs_pending", "", Pending) && RegisterCommand("sr_prefs_final", "", FinalWrite);
+    return RegisterCommand("sr_prefs_pending", "", Pending) && RegisterCommand("sr_prefs_final", "", FinalWrite) &&
+        RegisterCommand("sr_prefs_menu", "", ShowSettings) && RegisterCommand("sr_prefs_type", "", SetType) &&
+        RegisterCommand("sr_prefs_observe", "", Observe) && RegisterCommand("sr_prefs_drop", "", DropPrefab) &&
+        RegisterCommand("sr_prefs_close", "", CloseSettings);
 }
 
 public void CookieReady(PrefRequest request, Player player, any data, const char[] error)
@@ -61,8 +70,10 @@ public void Saved(PrefRequest request, Player player, any data, const char[] err
 
 public void Pending(Player caller, const char[] arguments)
 {
-    Prefs_WhenCached(client, Unexpected);
-    Prefs_WhenSaved(client, Unexpected);
+    Player players[2];
+    if (GetPlayers(players, sizeof(players)) != 1) { LogMessage("PREFS_FAILED_PENDING_PLAYER"); return; }
+    client = players[0];
+    if (!Prefs_WhenCached(client, Unexpected) || !Prefs_WhenSaved(client, Unexpected)) LogMessage("PREFS_FAILED_PENDING");
 }
 public void FinalWrite(Player caller, const char[] arguments)
 {
@@ -73,4 +84,39 @@ public void Unexpected(PrefRequest request, Player player, any data, const char[
 {
     Prefs_CloseRequest(request);
     LogMessage("PREFS_UNEXPECTED_CALLBACK");
+}
+
+public void ShowSettings(Player caller, const char[] arguments)
+{
+    if (settings != NoPrefMenu) Prefs_CloseMenu(settings);
+    settings = Prefs_ShowMenu(client);
+    if (!settings || !Prefs_MenuOpen(settings)) LogMessage("PREFS_FAILED_MENU");
+}
+public void SetType(Player caller, const char[] arguments)
+{
+    if (!ParseInt(arguments, menuType, 0, 3)) { LogMessage("PREFS_FAILED_TYPE"); return; }
+    if (prefab != NoPrefMenuItem) Prefs_ClosePrefabMenu(prefab);
+    prefab = Prefs_SetPrefabMenu(cookies[0], view_as<PrefMenuType>(menuType), "Music setting");
+    if (!prefab) LogMessage("PREFS_FAILED_PREFAB");
+}
+public void CloseSettings(Player caller, const char[] arguments)
+{
+    if (settings != NoPrefMenu) { Prefs_CloseMenu(settings); settings = NoPrefMenu; }
+}
+public void DropPrefab(Player caller, const char[] arguments)
+{
+    Prefs_ClosePrefabMenu(prefab); prefab = NoPrefMenuItem;
+}
+public void Observe(Player caller, const char[] arguments)
+{
+    Prefs_WhenSaved(client, Observed, menuType);
+}
+public void Observed(PrefRequest request, Player player, any data, const char[] error)
+{
+    Prefs_CloseRequest(request);
+    char value[256], message[320];
+    if (error[0] || !Prefs_Get(player, cookies[0], value, sizeof(value))) { LogMessage("PREFS_FAILED_OBSERVE"); return; }
+    Format(message, sizeof(message), "PREFS_MENU_VALUE_%d:%s", data, value);
+    LogMessage(message);
+    LogMessage("PREFS_MENU_SAVED");
 }

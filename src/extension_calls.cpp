@@ -185,6 +185,24 @@ KeelResult Foundation::NativePlayerSnapshot(SrPlayerIdentity* output, std::uint3
     return KEEL_RESULT_OK;
 }
 
+KeelResult Foundation::NativeConsumerStatus(KeelPluginHandle provider, std::uint64_t owner) {
+    Thread();
+    if (!provider || !owner) return KEEL_RESULT_INVALID_ARGUMENT;
+    for (const auto& [id, slot] : scripts_) for (const auto* script : {slot.current.get(), slot.replacement.get()}) {
+        if (!script || script->owner != owner) continue;
+        bool allowed = false;
+        for (const auto registration : script->providers) {
+            const auto found = providers_.find(registration);
+            if (found != providers_.end() && found->second.owner == provider) { allowed = true; break; }
+        }
+        if (!allowed) return KEEL_RESULT_INVALID_ARGUMENT;
+        if (script->state == PluginState::Running) return KEEL_RESULT_OK;
+        if (script->state == PluginState::Paused || script->state == PluginState::Loading) return KEEL_RESULT_BUSY;
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    return KEEL_RESULT_NOT_FOUND;
+}
+
 Cell Foundation::InvokeContextNative(Script& script, Provider& provider, const Arguments& arguments) {
     NativeInvocation invocation{*this, script, provider, arguments};
     const auto call = invocation.Api();

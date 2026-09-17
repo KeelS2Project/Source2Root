@@ -8,6 +8,9 @@ enum PrefCookie { NoPrefCookie = 0 }
 enum PrefRequest { NoPrefRequest = 0 }
 enum PrefAccess { Pref_Public, Pref_Protected, Pref_Private }
 enum PrefState { Pref_Loading, Pref_Ready, Pref_Failed }
+enum PrefMenuItem { NoPrefMenuItem = 0 }
+enum PrefMenu { NoPrefMenu = 0 }
+enum PrefMenuType { Pref_YesNo, Pref_YesNoInteger, Pref_OnOff, Pref_OnOffInteger }
 
 // Called on the server thread. Empty error means success. Catalog/cookie
 // callbacks receive NoPlayer. Close the request when finished. Pause retains
@@ -55,3 +58,20 @@ native bool Prefs_Retry(Player player = NoPlayer);
 native int Prefs_UserCookieCount();
 native bool Prefs_UserCookieName(int index, char[] output, int capacity);
 native bool Prefs_UserSet(Player player, const char[] name, const char[] value);
+
+// Public cookies can offer built-in yes/no, 1/0, on/off or 1/0 choices. Labels
+// are 1..64 bytes. Registrations belong to the registering script and disappear
+// on close/unload; paused plugins' choices are disabled. The latest live
+// registration for a cookie wins during staged plugin reload.
+native PrefMenuItem Prefs_SetPrefabMenu(PrefCookie cookie, PrefMenuType type, const char[] label);
+native bool Prefs_ClosePrefabMenu(PrefMenuItem item);
+// Shared, paginated menu across registered cookies. Protected settings appear
+// read only, private settings are hidden; public settings without a prefab are
+// shown read only. Values shown are cached, not a promise of durable storage.
+// Call from a running script callback after caching. The returned display
+// belongs to the caller and closes on pause/unload/disconnect/authentication
+// loss. Closing is completed on a subsequent frame if host cleanup must retry.
+// Close the resource even after timeout/selection. Submenus have a Back item.
+native PrefMenu Prefs_ShowMenu(Player player);
+native bool Prefs_MenuOpen(PrefMenu menu);
+native bool Prefs_CloseMenu(PrefMenu menu);

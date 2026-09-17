@@ -155,7 +155,12 @@ int main(int argc, char** argv) {
         };
         Check(foundation.Load(install("first")) && foundation.Load(install("second")), "real scripts use native memory and owned resources");
         Check(probe.foreign_refusals == 1 && host.destroyed == 2, "foreign ownership and explicit close verified");
+        Check(foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_OK &&
+            foundation.NativeConsumerStatus(999, probe.first_owner) == KEEL_RESULT_INVALID_ARGUMENT, "consumer status verifies provider lease");
+        Check(foundation.Pause("first") && foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_BUSY &&
+            foundation.Resume("first"), "consumer status distinguishes paused and running generations");
         Check(foundation.Reload("first"), "staged reload owns distinct resources");
+        Check(foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_NOT_FOUND, "retired consumer generation never becomes active again");
         Check(host.stopped == 1 && host.destroyed == 4, "retired script cleanup");
         Check(foundation.UnregisterNative(100, probe.registration) == KEEL_RESULT_BUSY, "retained providers refuse unload");
         Check(foundation.Unload("second"), "release second script before last-consumer failure");

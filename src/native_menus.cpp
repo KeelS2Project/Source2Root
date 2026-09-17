@@ -46,7 +46,7 @@ KeelResult Foundation::OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerCo
     result = host_.RenderMenu(player, it->second.menu.Html(), static_cast<int>(spec.timeout_milliseconds));
     if (result != KEEL_RESULT_OK) {
         it->second.cleared = true;
-        CloseNativeDisplay(player.slot);
+        if (!CloseNativeDisplay(player.slot)) session = id;
         return result;
     }
     session = id;
@@ -94,6 +94,14 @@ KeelResult Foundation::CloseNativeMenu(KeelPluginHandle owner, SrMenuSession ses
         if (display.owner != owner) return KEEL_RESULT_INVALID_ARGUMENT;
         return CloseNativeDisplay(slot) ? KEEL_RESULT_OK : KEEL_RESULT_BUSY;
     }
+    return KEEL_RESULT_NOT_FOUND;
+}
+
+KeelResult Foundation::NativeMenuStatus(KeelPluginHandle owner, SrMenuSession session) {
+    Thread();
+    if (!owner || !session) return KEEL_RESULT_INVALID_ARGUMENT;
+    for (const auto& [slot, display] : native_displays_) if (display.session == session)
+        return display.owner == owner ? KEEL_RESULT_OK : KEEL_RESULT_INVALID_ARGUMENT;
     return KEEL_RESULT_NOT_FOUND;
 }
 

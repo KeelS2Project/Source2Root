@@ -1,4 +1,5 @@
 #include "service.h"
+#include "menu.h"
 
 #include <fstream>
 #include <iostream>
@@ -150,6 +151,48 @@ static void Cache(const std::filesystem::path& root) {
     }
 }
 
+static void Menus(const std::filesystem::path& root) {
+    Service service(root / "prefs.sqlite");
+    const Identity player{0, 1, First};
+    auto music = service.Register(Public), rank = service.Register(Protected), hidden = service.Register(Private);
+    service.Sync({player});
+    Until(service, [&] { return service.Pending() == 0; });
+    auto prefab = std::make_shared<Prefab>(Prefab{music, PrefabType::YesNo, "Music", 1});
+    ValidatePrefab(*prefab);
+    Reject([&] { ValidatePrefab({rank, PrefabType::YesNo, "Rank", 1}); }, "protected cookies have no editable prefab");
+    Reject([&] { ValidatePrefab({hidden, PrefabType::YesNo, "Hidden", 1}); }, "private cookies have no menu prefab");
+    Reject([&] { ValidatePrefab({music, static_cast<PrefabType>(99), "Bad", 1}); }, "unknown prefab rejected");
+    const std::vector<std::weak_ptr<Prefab>> items{prefab};
+    auto menu = BuildSettings(service, player, items, 0);
+    Check(menu.rows.size() == 2 && menu.rows[0].enabled && !menu.rows[1].enabled &&
+        menu.rows[1].text.find("[read only]") != std::string::npos, "public editable, protected visible, private omitted");
+    for (int i = 0; i < 4; ++i) {
+        const auto type = static_cast<PrefabType>(i);
+        Check(ChoiceValue(type, true) == (i == 0 ? "yes" : i == 2 ? "on" : "1") &&
+            ChoiceValue(type, false) == (i == 0 ? "no" : i == 2 ? "off" : "0"), "all four prefab encodings");
+        Check(ChoiceLabel(type, true) == (i < 2 ? "Yes" : "On"), "prefab labels match encoded values");
+    }
+    auto replacement = std::make_shared<Prefab>(Prefab{music, PrefabType::OnOff, "Replacement", 2});
+    std::vector<std::weak_ptr<Prefab>> staged{prefab, replacement};
+    Check(BuildSettings(service, player, staged, 0).rows[0].text.starts_with("Replacement"), "latest live staged registration wins");
+    replacement.reset();
+    Check(BuildSettings(service, player, staged, 0).rows[0].text.starts_with("Music"), "failed staged replacement preserves prior registration");
+    menu.rows.clear(); prefab.reset();
+    Check(!BuildSettings(service, player, staged, 0).rows[0].enabled, "closed prefab leaves a public value read only");
+    for (unsigned i = 0; i < 32; ++i) service.Register({"extra" + std::to_string(i), "", Access::Public});
+    Until(service, [&] { return service.Pending() == 0; });
+    const auto first = BuildSettings(service, player, {}, 0), last = BuildSettings(service, player, {}, 999);
+    Check(first.page == 0 && first.rows.size() == SettingsPerPage + 1 && first.rows.back().page == 1 &&
+        last.page == 1 && last.rows.back().page == 0 && first.rows.size() <= 32 && last.rows.size() <= 32,
+        "catalog pagination fits native menu bounds and clamps obsolete page numbers");
+    service.Set(player, music, std::string(255, 'x'), 1);
+    menu = BuildSettings(service, player, {}, 1);
+    for (const auto& row : menu.rows) Check(row.text.size() <= 96, "menu text respects renderer limit");
+    Until(service, [&] { return service.CanStop(); });
+    service.Sync({});
+    Reject([&] { BuildSettings(service, player, {}, 0); }, "disconnected identity cannot create settings menu");
+}
+
 int main(int argc, char** argv) {
     try {
         Check(argc == 3, "clientprefs_test storage|cache private-fixture");
@@ -158,6 +201,7 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(root);
         if (std::string(argv[1]) == "storage") Storage(root);
         else if (std::string(argv[1]) == "cache") Cache(root);
+        else if (std::string(argv[1]) == "menus") Menus(root);
         else throw std::runtime_error("Unknown test mode.");
         std::cout << "Client preferences " << argv[1] << " checks passed\n";
         return 0;
