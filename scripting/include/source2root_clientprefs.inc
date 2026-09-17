@@ -1,0 +1,57 @@
+#if defined _source2root_clientprefs_included
+    #endinput
+#endif
+#define _source2root_clientprefs_included
+#include <source2root>
+
+enum PrefCookie { NoPrefCookie = 0 }
+enum PrefRequest { NoPrefRequest = 0 }
+enum PrefAccess { Pref_Public, Pref_Protected, Pref_Private }
+enum PrefState { Pref_Loading, Pref_Ready, Pref_Failed }
+
+// Called on the server thread. Empty error means success. Catalog/cookie
+// callbacks receive NoPlayer. Close the request when finished. Pause retains
+// callbacks; script unload, request close or player disconnect suppresses them.
+typedef PrefCallback = function void (PrefRequest request, Player player, any data, const char[] error);
+
+// Registration is asynchronous. Names are global, 1..30 letters/digits/._-;
+// descriptions and values are at most 255 bytes. Matching registrations share
+// one definition. Conflicting persisted descriptions/access modes fail; inspect
+// Prefs_CookieState/Error or use Prefs_WhenCookieReady before reading/writing.
+native PrefCookie Prefs_RegisterCookie(const char[] name, const char[] description, PrefAccess access);
+native PrefCookie Prefs_FindCookie(const char[] name);
+native bool Prefs_CloseCookie(PrefCookie cookie);
+native PrefState Prefs_CookieState(PrefCookie cookie);
+native bool Prefs_CookieError(PrefCookie cookie, char[] output, int capacity);
+native PrefAccess Prefs_GetAccess(PrefCookie cookie);
+native bool Prefs_IsReady();
+
+// Caches automatically follow authenticated human connections after first use
+// of this extension. Bots/pending IDs and stale/foreign Player handles cannot
+// access them. Prefs_Get returns an empty value for an unset registered cookie.
+native bool Prefs_IsCached(Player player);
+native bool Prefs_Get(Player player, PrefCookie cookie, char[] output, int capacity);
+// Success acknowledges the cache only. Accepted writes survive script unload
+// and player disconnect; failures stay dirty. Use WhenSaved/IsSaved to observe
+// successful SQLite commit. A process crash can lose uncommitted cache changes.
+native bool Prefs_Set(Player player, PrefCookie cookie, const char[] value);
+native bool Prefs_IsSaved(Player player);
+// Decimal Unix seconds, including timestamps beyond a 32-bit SourcePawn cell.
+native bool Prefs_GetTime(Player player, PrefCookie cookie, char[] output, int capacity);
+native bool Prefs_PlayerError(Player player, char[] output, int capacity);
+native PrefRequest Prefs_WhenReady(PrefCallback callback, any data = 0);
+native PrefRequest Prefs_WhenCookieReady(PrefCookie cookie, PrefCallback callback, any data = 0);
+native PrefRequest Prefs_WhenCached(Player player, PrefCallback callback, any data = 0);
+native PrefRequest Prefs_WhenSaved(Player player, PrefCallback callback, any data = 0);
+native bool Prefs_CloseRequest(PrefRequest request);
+// Retry catalog/failed writes (including disconnected accounts) after fixing
+// storage. A player also retries that account's failed load. NoPlayer supports
+// operator recovery with nobody connected. Unload refuses accepted dirty writes.
+native bool Prefs_Retry(Player player = NoPlayer);
+
+// Player settings interfaces must use these access-aware operations: public
+// values are visible/writable, protected visible/read-only, private hidden.
+// Access controls player presentation, not trusted script-to-script secrecy.
+native int Prefs_UserCookieCount();
+native bool Prefs_UserCookieName(int index, char[] output, int capacity);
+native bool Prefs_UserSet(Player player, const char[] name, const char[] value);

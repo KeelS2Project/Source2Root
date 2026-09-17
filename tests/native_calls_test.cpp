@@ -13,7 +13,17 @@ class Host final : public sr::GameHost {
 public:
     unsigned leases = 0, destroyed = 0, stopped = 0;
     bool release_failure = false, destruction_with_lease = true;
-    KeelResult Lookup(int, sr::Player&) override { return KEEL_RESULT_NOT_FOUND; }
+    sr::Player player{3, 7, 76561198000000001ull, true, false, "Native identity fixture"};
+    bool snapshot_failure = false;
+    KeelResult Lookup(int slot, sr::Player& output) override {
+        if (slot != player.slot) return KEEL_RESULT_NOT_FOUND;
+        output = player; return KEEL_RESULT_OK;
+    }
+    KeelResult NextPlayer(int after, sr::Player& output) override {
+        if (snapshot_failure && after >= 0) return KEEL_RESULT_ENGINE_FAILURE;
+        if (after >= player.slot) return KEEL_RESULT_NOT_FOUND;
+        output = player; return KEEL_RESULT_OK;
+    }
     KeelResult Reply(const sr::Player*, const std::string&) override { return KEEL_RESULT_OK; }
     void Log(const std::string& text) override {
         if (text.find("resource valid during stop") != std::string::npos) ++stopped;
@@ -47,12 +57,23 @@ struct Probe {
     sr::Cell first = 0;
     std::uint64_t first_owner = 0;
     unsigned creations = 0, foreign_refusals = 0;
+    sr::Cell first_player = 0;
     static KeelResult Call(void* raw, const SrNativeCall* api, int32_t* result, char* error, uint32_t capacity) noexcept {
         try {
             auto& probe = *static_cast<Probe*>(raw);
             source2root::NativeCall call(*api);
             const auto operation = call.Int(1);
-            if (operation == 0) {
+            if (operation == 4) {
+                SrPlayerIdentity identity{};
+                Check(call.Player(call.Int(2), identity) && identity.slot == 3 && identity.connection == 7 &&
+                    identity.steam_id == probe.host.player.steam_id && identity.authenticated && !identity.bot, "owned live player identity");
+                if (probe.first_owner != call.Owner()) Check(!call.Player(probe.first_player, identity), "foreign player handle refused");
+                else probe.first_player = call.Int(2);
+                ++probe.host.player.connection;
+                Check(!call.Player(call.Int(2), identity) && !identity.connection, "stale player handle clears output");
+                --probe.host.player.connection;
+                *result = 1;
+            } else if (operation == 0) {
                 Check(probe.foundation.UnregisterNative(100, probe.registration) == KEEL_RESULT_BUSY, "active native cannot unregister");
                 Check(call.String(3) == "native text", "string input");
                 const auto values = call.Array(6, call.Int(7));
@@ -108,6 +129,14 @@ int main(int argc, char** argv) {
         Host host;
         sr::Foundation foundation(host, argv[1], root);
         Probe probe{host, foundation};
+        std::array<SrPlayerIdentity, 128> players{};
+        std::uint32_t player_count = 9;
+        Check(foundation.NativePlayerSnapshot(players.data(), players.size(), &player_count) == KEEL_RESULT_OK &&
+            player_count == 1 && players[0].connection == 7, "complete live player snapshot");
+        host.snapshot_failure = true;
+        Check(foundation.NativePlayerSnapshot(players.data(), players.size(), &player_count) == KEEL_RESULT_ENGINE_FAILURE &&
+            player_count == 0, "incomplete player snapshot exposes no partial count");
+        host.snapshot_failure = false;
         SrContextNativeSpec spec{sizeof(spec), SR_NATIVE_API_VERSION, "ExtensionProbe", 8, 0,
             "test.native", 1, &Probe::Call, &probe};
         Check(foundation.RegisterContextNative(100, spec, probe.registration) == KEEL_RESULT_OK, "register rich native");

@@ -91,6 +91,16 @@ protected:
         if (!native_api_) return KEEL_RESULT_NOT_READY;
         return native_api_->cancel_callback(native_api_->context, HostContext().PluginHandle(), callback);
     }
+    KeelResult PlayerSnapshot(std::vector<SrPlayerIdentity>& players) {
+        players.clear();
+        if (!native_api_ || !native_api_->player_snapshot) return KEEL_RESULT_NOT_READY;
+        std::array<SrPlayerIdentity, 128> snapshot{};
+        std::uint32_t count = 0;
+        const auto result = native_api_->player_snapshot(native_api_->context, snapshot.data(), snapshot.size(), &count);
+        if (result == KEEL_RESULT_OK && count <= snapshot.size()) players.assign(snapshot.begin(), snapshot.begin() + count);
+        else if (result == KEEL_RESULT_OK) return KEEL_RESULT_ENGINE_FAILURE;
+        return result;
+    }
 
     template <typename Owner, typename... Arguments>
     bool RegisterNative(const char* name, std::int32_t (Owner::*callback)(Arguments...)) {

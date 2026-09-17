@@ -23,6 +23,10 @@ public bool OnPluginStart()
     if (!closed || ExtensionProbe(2, closed, "", output, sizeof(output), values, sizeof(values), scalar) != 1
         || ExtensionProbe(1, closed, "", output, sizeof(output), values, sizeof(values), scalar) != -1)
         return false;
+    Player players[2];
+    if (GetPlayers(players, sizeof(players)) != 1 ||
+        ExtensionProbe(4, view_as<int>(players[0]), "", output, sizeof(output), values, sizeof(values), scalar) != 1)
+        return false;
     return true;
 }
 

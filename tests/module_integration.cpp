@@ -11,6 +11,9 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#if defined(SR_PREFS_TEST)
+#include "store.h"
+#endif
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -180,6 +183,57 @@ int main(int argc, char** argv) {
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
             return 0;
         }
+#if defined(SR_PREFS_TEST)
+        if (argc == 12 && std::string(argv[10]) == "clientprefs") {
+            auto authentication = adapter.Get<void (*)(bool, bool)>("SrFixtureAuthentication");
+            auto occurrences = [&](const char* text) {
+                const std::string log = messages();
+                std::size_t offset = 0;
+                unsigned found = 0;
+                while ((offset = log.find(text, offset)) != std::string::npos) { ++found; offset += std::strlen(text); }
+                return found;
+            };
+            auto await = [&](auto ready) {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                while (!ready()) {
+                    Check(std::chrono::steady_clock::now() < deadline, "preferences module deadline");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            };
+            run("sr plugins pause hello");
+            for (int i = 0; i < 10; ++i) { frame(); std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
+            Check(!contains("PREFS_SCRIPT_OK"), "paused VM retains preferences callbacks");
+            run("sr plugins resume hello");
+            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 1; });
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked"), "preferences provider retained while scripts use cookies");
+            run("sr_prefs_pending");
+            authentication(false, false); frame();
+            Check(!contains("PREFS_UNEXPECTED_CALLBACK"), "lost authentication cancels player waits");
+            authentication(true, false); frame();
+            run("sr_prefs_pending");
+            authentication(true, true); frame();
+            Check(!contains("PREFS_UNEXPECTED_CALLBACK"), "bot identities cannot receive player waits");
+            authentication(true, false); frame();
+            run("sr_prefs_pending");
+            reconnect(); frame();
+            Check(!contains("PREFS_UNEXPECTED_CALLBACK"), "reused player slot cannot receive the old connection's callback");
+            run("sr plugins reload hello");
+            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 2; });
+            run("sr_prefs_pending");
+            run("sr plugins reload hello");
+            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 3; });
+            run("sr_prefs_final");
+            run("sr plugins unload hello");
+            await([&] { return stop(); });
+            Check(!contains("PREFS_FAILED") && !contains("PREFS_UNEXPECTED_CALLBACK"), "preferences ownership, cache and save callbacks isolated by script generation");
+            const auto values = source2root::prefs::Store(script / "data/extensions/source2root.clientprefs/clientprefs.sqlite").Load(76561197960265851ULL);
+            Check(values.at("music").text == "on-unload", "accepted preference write committed after script unload before host stop");
+            Check(network_stop(), "preferences fixture teardown");
+            std::cout << messages() << "Client preferences module lifecycle passed\n";
+            return 0;
+        }
+#endif
         if (argc == 12 && (std::string(argv[10]) == "database_async" || std::string(argv[10]) == "database_configured")) {
             auto occurrences = [&](const char* text) {
                 const std::string log = messages();

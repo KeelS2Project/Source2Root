@@ -52,6 +52,7 @@ public:
     int user_id = 70;
     unsigned action_count = 0, mutate_pawn = 0;
     bool player_alive = true, connected = true, immediate_disconnect = false, engine_available = true;
+    bool authenticated = true, bot = false;
     bool reconnect_on_engine_query = false;
     unsigned kicks = 0;
     bool fail_restart = false;
@@ -67,7 +68,8 @@ public:
         if (slot != 3 && !(activity_audience && slot == 4)) return KEEL_RESULT_NOT_FOUND;
         player = {};
         player.size = sizeof(player); player.slot = slot; player.user_id = user_id + slot - 3;
-        player.flags = KEELS2_PLAYER_CONNECTED | KEELS2_PLAYER_AUTHENTICATED | (player_alive ? KEELS2_PLAYER_ALIVE : 0);
+        player.flags = KEELS2_PLAYER_CONNECTED | (authenticated ? KEELS2_PLAYER_AUTHENTICATED : 0) |
+            (bot ? KEELS2_PLAYER_BOT : 0) | (player_alive ? KEELS2_PLAYER_ALIVE : 0);
         player.steam_id = 76561197960265851ULL + slot - 3;
         player.controller_handle = 0x12003; player.pawn_handle = pawn_handle;
         std::strcpy(player.name, "Module fixture player");
@@ -369,6 +371,9 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureChatCommand(const char* verb
     return active && active->Chat(text, slot, verb);
 }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureReconnect() { if (active) ++active->user_id; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureAuthentication(bool authenticated, bool bot) {
+    if (active) { active->authenticated = authenticated; active->bot = bot; }
+}
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_PlayerAction(
     keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* pawn,

@@ -144,9 +144,46 @@ struct Foundation::NativeInvocation {
             },
             [](void* raw, char* output, std::uint32_t capacity) {
                 return Guard(raw, [&](auto& call) { Copy(call.script.manifest.id, output, capacity); });
+            },
+            [](void* raw, Cell handle, SrPlayerIdentity* output) {
+                if (!output || output->size != sizeof(*output)) return KEEL_RESULT_INVALID_ARGUMENT;
+                *output = {sizeof(*output), -1, 0, 0, KEEL_FALSE, KEEL_FALSE};
+                KeelResult resolved = KEEL_RESULT_NOT_FOUND;
+                const auto guarded = Guard(raw, [&](auto& call) {
+                    Player player;
+                    resolved = call.foundation.ResolvePlayer(call.script, handle, player);
+                    if (resolved == KEEL_RESULT_OK) *output = {sizeof(*output), player.slot, player.connection,
+                        player.steam_id, player.authenticated ? KEEL_TRUE : KEEL_FALSE, player.bot ? KEEL_TRUE : KEEL_FALSE};
+                });
+                return guarded == KEEL_RESULT_OK ? resolved : guarded;
             }};
     }
 };
+
+KeelResult Foundation::NativePlayerSnapshot(SrPlayerIdentity* output, std::uint32_t capacity, std::uint32_t* count) {
+    Thread();
+    if (count) *count = 0;
+    if (!output || !count || !capacity || capacity > 128) return KEEL_RESULT_INVALID_ARGUMENT;
+    std::vector<SrPlayerIdentity> players;
+    int after = -1;
+    for (;;) {
+        Player candidate, current;
+        const auto next = host_.NextPlayer(after, candidate);
+        if (next == KEEL_RESULT_NOT_FOUND) break;
+        if (next != KEEL_RESULT_OK) return next;
+        if (candidate.slot <= after || candidate.slot >= 128 || !candidate.connection || players.size() == capacity)
+            return KEEL_RESULT_ENGINE_FAILURE;
+        after = candidate.slot;
+        const auto lookup = host_.Lookup(candidate.slot, current);
+        if (lookup == KEEL_RESULT_NOT_FOUND || (lookup == KEEL_RESULT_OK && !current.SameConnection(candidate))) continue;
+        if (lookup != KEEL_RESULT_OK) return lookup;
+        players.push_back({sizeof(SrPlayerIdentity), current.slot, current.connection, current.steam_id,
+            current.authenticated ? KEEL_TRUE : KEEL_FALSE, current.bot ? KEEL_TRUE : KEEL_FALSE});
+    }
+    std::copy(players.begin(), players.end(), output);
+    *count = static_cast<std::uint32_t>(players.size());
+    return KEEL_RESULT_OK;
+}
 
 Cell Foundation::InvokeContextNative(Script& script, Provider& provider, const Arguments& arguments) {
     NativeInvocation invocation{*this, script, provider, arguments};

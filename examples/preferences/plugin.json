@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "preferences_example",
+  "name": "Player Preferences Example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "preferences.smx",
+  "source": "preferences.sp",
+  "enabled": true,
+  "dependencies": []
+}

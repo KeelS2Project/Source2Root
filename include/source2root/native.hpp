@@ -61,6 +61,13 @@ public:
         Check(call_.script_id(call_.context, value.data(), value.size()));
         return value.data();
     }
+    bool Player(std::int32_t handle, SrPlayerIdentity& player) const {
+        player = {sizeof(player), -1, 0, 0, KEEL_FALSE, KEEL_FALSE};
+        const auto result = call_.player_identity(call_.context, handle, &player);
+        if (result == KEEL_RESULT_NOT_FOUND) return false;
+        Check(result);
+        return true;
+    }
     template <typename T>
     std::int32_t Own(std::uint32_t type, std::unique_ptr<T> value) const {
         if (!value) throw std::invalid_argument("Resource is empty.");

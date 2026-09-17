@@ -14,6 +14,15 @@ extern "C" {
 typedef void (*SrResourceDestroy)(void* value);
 typedef uint64_t SrCallback;
 
+typedef struct SrPlayerIdentity {
+    uint32_t size;
+    int32_t slot;
+    uint64_t connection;
+    uint64_t steam_id;
+    KeelBool authenticated;
+    KeelBool bot;
+} SrPlayerIdentity;
+
 typedef struct SrNativeCall {
     uint32_t size;
     uint32_t api_version;
@@ -37,6 +46,8 @@ typedef struct SrNativeCall {
     KeelResult (*capture_callback)(void*, uint32_t index, SrCallback* callback);
     KeelResult (*config_path)(void*, char* output, uint32_t capacity);
     KeelResult (*script_id)(void*, char* output, uint32_t capacity);
+    /* Resolves this script's Player handle against its current connection. */
+    KeelResult (*player_identity)(void*, int32_t handle, SrPlayerIdentity* player);
 } SrNativeCall;
 
 typedef KeelResult (*SrContextNativeFunction)(void* user_data, const SrNativeCall* call,
@@ -67,6 +78,9 @@ typedef struct SrNativeApi {
     KeelResult (*deliver_callback)(void*, KeelPluginHandle owner, SrCallback,
         const int32_t* cells, uint32_t count, const char* text);
     KeelResult (*cancel_callback)(void*, KeelPluginHandle owner, SrCallback);
+    /* Complete server-thread snapshot; no partial output on failure. At most
+       128 players. These identities are not script Player handles. */
+    KeelResult (*player_snapshot)(void*, SrPlayerIdentity* players, uint32_t capacity, uint32_t* count);
 } SrNativeApi;
 
 #ifdef __cplusplus

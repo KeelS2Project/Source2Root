@@ -117,7 +117,7 @@ function(sr_compile_script name source)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/scripts"
         COMMAND "${SR_SPCOMP}" "${source}" -i scripting/include -i plugins/include -o "${CMAKE_BINARY_DIR}/scripts/${name}.smx"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc plugins/include/admin_shared.inc)
+        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc scripting/include/source2root_clientprefs.inc plugins/include/admin_shared.inc)
     add_custom_target(script_${name} ALL DEPENDS "${CMAKE_BINARY_DIR}/scripts/${name}.smx")
 endfunction()
 sr_compile_script(player_status examples/player_status/player_status.sp)
@@ -125,6 +125,7 @@ sr_compile_script(greeting examples/greeting/greeting.sp)
 sr_compile_script(activity examples/activity/activity.sp)
 sr_compile_script(roll examples/roll/roll.sp)
 sr_compile_script(database_example examples/database/database.sp)
+sr_compile_script(preferences_example examples/preferences/preferences.sp)
 sr_compile_script(admin plugins/admin/admin.sp)
 sr_compile_script(player_actions plugins/player_actions/player_actions.sp)
 sr_compile_script(moderation plugins/moderation/moderation.sp)
@@ -138,6 +139,12 @@ if(BUILD_TESTING)
     add_test(NAME extension_worker_queue COMMAND sr_work_queue_test)
     set_tests_properties(extension_worker_queue PROPERTIES TIMEOUT 15)
     if(SR_DATABASE_EXTENSION)
+        add_executable(sr_clientprefs_test tests/clientprefs_test.cpp)
+        target_link_libraries(sr_clientprefs_test PRIVATE sr_clientprefs)
+        add_test(NAME clientprefs_storage COMMAND sr_clientprefs_test storage "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-storage")
+        add_test(NAME clientprefs_cache COMMAND sr_clientprefs_test cache "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-cache")
+        set_tests_properties(clientprefs_storage clientprefs_cache PROPERTIES TIMEOUT 30)
+        sr_compile_script(clientprefs tests/scripts/clientprefs.sp)
         sr_compile_script(database tests/scripts/database.sp)
         sr_compile_script(database_async tests/scripts/database_async.sp)
         sr_compile_script(database_configured tests/scripts/database_configured.sp)
@@ -262,6 +269,14 @@ if(BUILD_TESTING)
             "${CMAKE_BINARY_DIR}/test-fixtures/late-modules" "late" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
         set_tests_properties(native_late_load PROPERTIES TIMEOUT 30)
         if(SR_DATABASE_EXTENSION)
+            target_link_libraries(sr_module_integration PRIVATE sr_clientprefs)
+            target_compile_definitions(sr_module_integration PRIVATE SR_PREFS_TEST=1)
+            add_test(NAME clientprefs_native_module COMMAND sr_module_integration
+                "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
+                $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_clientprefs>
+                "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/clientprefs.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+                "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-module" "clientprefs" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
+            set_tests_properties(clientprefs_native_module PROPERTIES TIMEOUT 30)
             add_test(NAME database_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
                 $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_database>
