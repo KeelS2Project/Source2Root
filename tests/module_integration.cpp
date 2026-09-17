@@ -105,6 +105,17 @@ int main(int argc, char** argv) {
         Copy(argv[8], script / "plugins/hello/plugin.json");
         std::filesystem::remove(script / "logs/source2root.log");
         std::filesystem::create_directories(script / "configs");
+        if (argc == 12 && std::string(argv[10]) == "http") {
+            const auto* url = std::getenv("SR_HTTP_URL"), *tls = std::getenv("SR_HTTP_TLS_URL");
+            const auto* ca = std::getenv("SR_HTTP_CA"), *bad_ca = std::getenv("SR_HTTP_BAD_CA");
+            const auto* files = std::getenv("SR_HTTP_FIXTURE_FILES"), *consumer = std::getenv("SR_HTTP_NATIVE_MODULE");
+            Check(url && tls && ca && bad_ca && files && consumer, "HTTP fixture environment is required");
+            std::ofstream(script / "configs/http-fixture.txt") << url << '\n' << tls << '\n';
+            Copy(ca, script / "configs/extensions/source2root.http/ca.pem");
+            Copy(bad_ca, script / "configs/extensions/source2root.http/bad-ca.pem");
+            Copy(std::filesystem::path(files) / "upload.bin", script / "data/hello/upload.bin");
+            Copy(consumer, plugins / ("zz_http_native" + extension));
+        }
         if (argc == 12 && std::string(argv[10]) == "geoip") {
             const auto* data = std::getenv("SR_GEOIP_TEST_DATA");
             Check(data && *data, "GeoIP fixture needs upstream sample database");
@@ -201,6 +212,47 @@ int main(int argc, char** argv) {
                   "stock baseline must refuse platform before initialization");
             Check(stop(), "stock host stops after rejected module");
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
+            return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "http") {
+            const auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned found = 0; std::size_t offset = 0;
+                while ((offset = log.find(value, offset)) != std::string::npos) { ++found; offset += std::strlen(value); }
+                return found;
+            };
+            auto await = [&](auto ready) {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                while (!ready()) {
+                    if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("HTTP fixture completion timeout");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }
+            };
+            Check(occurrences("HTTP_SCRIPT_START") == 1, "HTTP script startup and request construction");
+            run("sr plugins pause hello");
+            await([&] { frame(); return contains("HTTP_NATIVE_OK") || contains("HTTP_NATIVE_FAILED"); });
+            for (unsigned i = 0; i < 25; ++i) { frame(); std::this_thread::sleep_for(std::chrono::milliseconds(2)); }
+            Check(!contains("HTTP_SCRIPT_HELLO") && !contains("HTTP_SCRIPT_BINARY") && !contains("HTTP_NATIVE_FAILED"), "script callbacks wait while paused; native service works on worker");
+            run("sr plugins resume hello");
+            auto completed = [&](unsigned count) {
+                frame();
+                return occurrences("HTTP_SCRIPT_HELLO") == count && occurrences("HTTP_SCRIPT_BINARY") == count &&
+                    occurrences("HTTP_SCRIPT_FORM") == count && occurrences("HTTP_SCRIPT_TLS") == count && occurrences("HTTP_SCRIPT_ERROR") == count;
+            };
+            await([&] { return completed(1); });
+            run("sr_http_check"); run("sr_http_stale");
+            Check(contains("stale, foreign or wrong-type handle") && !contains("HTTP_SCRIPT_FAILED"), "HTTP retained response and stale handle rejection");
+            run("sr plugins reload hello");
+            Check(occurrences("HTTP_SCRIPT_START") == 2, "HTTP staged script reload succeeds");
+            await([&] { return completed(2); });
+            run("sr_http_pending");
+            run("sr plugins unload hello");
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked") && contains("HTTP Native Fixture"), "native consumer service lease retains HTTP provider");
+            run("keel plugins unload 3");
+            await([&] { frame(); return stop(); });
+            Check(!contains("HTTP_SCRIPT_FAILED") && !contains("HTTP_NATIVE_FAILED"), "HTTP close/unload cancels outstanding callbacks and drains workers");
+            Check(network_stop(), "HTTP fixture teardown");
+            std::cout << messages() << "HTTP native and script module lifecycle passed\n";
             return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "regex") {

@@ -49,7 +49,7 @@ public:
                     !native_api_->deliver_callback || !native_api_->cancel_callback)
                     return SetupFailed("Source2Root native call service is incompatible.");
             }
-            if (services_.Publish(service_.c_str(), version_, &marker_, publication_) != KEEL_RESULT_OK)
+            if (services_.Publish(service_.c_str(), version_, service_value_ ? service_value_ : &marker_, publication_) != KEEL_RESULT_OK)
                 return SetupFailed("Could not publish the extension's provider service.");
             for (auto& binding : bindings_) {
                 KeelResult registered;
@@ -76,8 +76,10 @@ public:
     bool PrepareUnload() final { return PrepareExtensionUnload() && Release(); }
 
 protected:
-    explicit Extension(const char* provider_service, std::uint32_t version = 1)
-        : service_(provider_service ? provider_service : ""), version_(version) {}
+    // An optional immutable API table can replace the marker service. It must
+    // remain alive through withdrawal; existing marker-only extensions need no changes.
+    explicit Extension(const char* provider_service, std::uint32_t version = 1, const void* service_value = nullptr)
+        : service_(provider_service ? provider_service : ""), version_(version), service_value_(service_value) {}
     virtual bool OnExtensionStart() = 0;
     virtual bool PrepareExtensionUnload() { return true; }
 
@@ -256,6 +258,7 @@ private:
 
     const std::string service_;
     const std::uint32_t version_;
+    const void* service_value_ = nullptr;
     std::uint32_t marker_ = 1;
     bool staging_ = false, ready_ = false, queried_ = false, native_queried_ = false;
     keels2::services::Service services_;

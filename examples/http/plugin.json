@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "http_example",
+  "name": "HTTP Transfer Example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "http.smx",
+  "source": "http.sp",
+  "enabled": true,
+  "dependencies": []
+}

@@ -68,5 +68,11 @@
     "repository": "https://github.com/PCRE2Project/pcre2",
     "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.gz",
     "sha256": "ebcc25aadf2a51fa1fefa9b8bc9e7a79b3dae86870a0f1152a22e42befd46888"
+  },
+  "curl": {
+    "version": "8.22.0",
+    "repository": "https://github.com/curl/curl",
+    "url": "https://github.com/curl/curl/releases/download/curl-8_22_0/curl-8.22.0.tar.xz",
+    "sha256": "f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7"
   }
 }
