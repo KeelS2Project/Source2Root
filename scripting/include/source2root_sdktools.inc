@@ -14,8 +14,8 @@ enum SchemaType
 }
 // Game-thread operations through Keel's entity/schema services. Availability,
 // field names and types depend on the active game adapter and compatibility
-// profile. No raw memory addresses or guessed offsets are exposed. This first
-// SDKTools layer provides reads; it does not implement entity writes/spawning,
+// profile. No raw memory addresses or guessed offsets are exposed. This
+// SDKTools layer provides typed reads/writes; it does not implement spawning,
 // teleportation, tracing, sound, temp entities or the SourceMod SDKCall API.
 // Handles belong to this script generation and are closed on reload/unload.
 // Entity identity includes the engine serial and map epoch; retained entities
@@ -58,3 +58,21 @@ native bool Entity_ReadSourceHandle(Entity entity, SchemaField field, int& sourc
 // Opens a separately owned entity referenced by an entity-handle field. Returns
 // NoEntity for the engine's invalid reference (-1), or on a lookup/read failure.
 native Entity Entity_ReadEntity(Entity entity, SchemaField field);
+
+#define ENTITY_WRITE_NUMERIC_FIELDS 1
+// Optional host keels2.entity_writes API1. Output mask is zero on failure.
+// Binary capabilities do not guarantee that a particular entity can be written.
+native bool Entity_GetWriteCapabilities(int& capabilities);
+// Exact schema width/signedness; overflow and bool values other than 0/1 fail.
+// The adapter marks changed entities for network replication. This does not
+// invoke game-specific setters or change callbacks. Use dedicated game actions
+// when their semantics are required. No pointer, handle, string or array writes.
+// Failure during an engine notification can occur after the field was written.
+// Close/reload callbacks can invalidate resources while a write is completing.
+native bool Entity_WriteInt(Entity entity, SchemaField field, int value);
+// Decimal full-width signed/unsigned64, narrowed only after range validation.
+// No whitespace, leading '+', hexadecimal or trailing characters.
+native bool Entity_WriteIntegerText(Entity entity, SchemaField field, const char[] value);
+// Float64 fields receive the exact widening of SourcePawn's finite float32.
+native bool Entity_WriteFloat(Entity entity, SchemaField field, float value);
+native bool Entity_WriteVector(Entity entity, SchemaField field, const float value[3]);

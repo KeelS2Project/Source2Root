@@ -2,7 +2,8 @@
 
 public bool OnPluginStart()
 {
-    return RegisterCommand("sr_entity_health", "", Health, "Read the health field of your current pawn");
+    return RegisterCommand("sr_entity_health", "", Health, "Read the health field of your current pawn")
+        && RegisterCommand("sr_entity_health100", "admin.slay", Health100, "Set the health field of your live pawn to 100");
 }
 public void Health(Player caller, const char[] arguments)
 {
@@ -22,4 +23,18 @@ public void Health(Player caller, const char[] arguments)
     }
     else ReplyToCommand(caller, "Your current pawn is unavailable.");
     Schema_Close(health);
+}
+
+public void Health100(Player caller, const char[] arguments)
+{
+    if (caller == NoPlayer || !IsPlayerAlive(caller)) { ReplyToCommand(caller, "Use this command as a living player."); return; }
+    SchemaField health = Schema_Find("CBaseEntity", "m_iHealth", Schema_Int32);
+    Entity pawn = Entity_FromPlayer(caller);
+    char message[256];
+    if (health != NoSchemaField && pawn != NoEntity && Entity_WriteInt(pawn, health, 100))
+        Format(message, sizeof(message), "Health field updated to 100.");
+    else GetLastError(message, sizeof(message));
+    if (pawn != NoEntity) Entity_Close(pawn);
+    if (health != NoSchemaField) Schema_Close(health);
+    ReplyToCommand(caller, message);
 }

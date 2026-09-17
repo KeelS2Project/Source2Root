@@ -1,6 +1,7 @@
 #include "entities.h"
 #include <bit>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -22,7 +23,10 @@ struct Fixture {
     std::uint32_t pawn = 0x23004;
     std::map<KeelEntityHandle, KeelEntityInfo> entities;
     std::map<KeelSchemaFieldHandle, FieldRecord> fields;
-    unsigned mutation = 0, metadata_fault = 0, reads = 0;
+    unsigned mutation = 0, metadata_fault = 0, reads = 0, writes = 0, write_caps = 1;
+    KeelResult write_status = KEEL_RESULT_OK, caps_status = KEEL_RESULT_OK;
+    std::vector<std::byte> last_write;
+    std::function<void()> on_write;
     bool wrong_identity = false, bad_bool = false, nonfinite = false;
     KeelResult available = KEEL_RESULT_OK;
     std::string profile = "fixture-v1";
@@ -126,11 +130,28 @@ struct Fixture {
         info->flags = KEELS2_PLAYER_CONNECTED; info->controller_handle = 0x12003; info->pawn_handle = s.pawn;
         return KEEL_RESULT_OK;
     }
+    static KeelResult Capabilities(KeelPluginHandle owner, unsigned* capabilities) {
+        if (Thread(owner) != KEEL_RESULT_OK) return KEEL_RESULT_WRONG_THREAD;
+        *capabilities = active->write_caps; return active->caps_status;
+    }
+    static KeelResult Write(KeelPluginHandle owner, KeelEntityHandle entity, KeelSchemaFieldHandle field,
+        const void* input, unsigned size) {
+        auto& s = *active; KeelEntityInfo info{};
+        if (Describe(owner, entity, &info)) return KEEL_RESULT_NOT_FOUND;
+        const auto found = s.fields.find(field);
+        if (found == s.fields.end() || size != Size(found->second.type)) return KEEL_RESULT_INCOMPATIBLE;
+        ++s.writes;
+        const auto* bytes = static_cast<const std::byte*>(input); s.last_write.assign(bytes,bytes + size);
+        const auto callback = s.on_write;
+        if (callback) callback();
+        return s.write_status;
+    }
+    static inline const KeelEntityWritesApi writes_api{sizeof(KeelEntityWritesApi),1,Capabilities,Write};
     static inline const KeelEntitiesApi entity_api{sizeof(KeelEntitiesApi), 1, ByIndex, Find, Release, Describe, Equal, Read};
     static inline const KeelSchemaApi schema_api{sizeof(KeelSchemaApi), 1, Resolve, ReleaseField, DescribeField};
     static inline const KeelPlayersApi player_api{sizeof(KeelPlayersApi), 1, nullptr, nullptr, Player};
     static inline const KeelNativeRuntimeApi runtime_api{sizeof(KeelNativeRuntimeApi), 1, Thread, nullptr, nullptr, nullptr};
-    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api); }
+    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api, &writes_api); }
 };
 Fixture* Fixture::active = nullptr;
 }
@@ -210,6 +231,70 @@ int main() {
             fields.pop_back(); fields.push_back(resolve(6));
         }
         Check(fixture.entities.empty() && fixture.fields.empty(), "quota resources release completely");
+        {
+            auto entity = service->Find(4);
+            struct Boundary { unsigned type; const char* low; const char* high; const char* below; const char* above; };
+            const Boundary boundaries[]{
+                {1,"0","255","-1","256"},{2,"-128","127","-129","128"},{3,"0","255","-1","256"},
+                {4,"-32768","32767","-32769","32768"},{5,"0","65535","-1","65536"},
+                {6,"-2147483648","2147483647","-2147483649","2147483648"},
+                {7,"0","4294967295","-1","4294967296"},
+                {8,"-9223372036854775808","9223372036854775807","-9223372036854775809","9223372036854775808"},
+                {9,"0","18446744073709551615","-1","18446744073709551616"},{12,"0","1","-1","2"}};
+            for (const auto& boundary : boundaries) {
+                auto field = resolve(boundary.type); const auto before = fixture.writes;
+                entity->SetIntegerText(*field,boundary.low); entity->SetIntegerText(*field,boundary.high);
+                Check(fixture.writes == before + 2 && fixture.last_write.size() == field->Size(), "integer boundary writes preserve field width");
+                Reject([&] { entity->SetIntegerText(*field,boundary.below); }, "integer lower overflow refused");
+                Reject([&] { entity->SetIntegerText(*field,boundary.above); }, "integer upper overflow refused");
+                Check(fixture.writes == before + 2, "range error never reaches host write");
+            }
+            auto field = resolve(9);
+            entity->SetIntegerText(*field,"18446744073709551615");
+            std::uint64_t wide{}; std::memcpy(&wide,fixture.last_write.data(),sizeof(wide));
+            Check(wide == UINT64_MAX,"full uint64 bits preserved");
+            Reject([&] { entity->SetInteger(*field,-1); }, "negative cell cannot silently wrap to unsigned64");
+            for (const auto* invalid : {"","+1"," 1","1 ","0xff","1x","1.0","--1"})
+                Reject([&] { entity->SetIntegerText(*field,invalid); }, "strict decimal text syntax");
+            field = resolve(8); entity->SetIntegerText(*field,"-9223372036854775808");
+            std::int64_t signed_wide{}; std::memcpy(&signed_wide,fixture.last_write.data(),sizeof(signed_wide));
+            Check(signed_wide == INT64_MIN,"full signed64 bits preserved");
+            field = resolve(11); entity->SetNumber(*field,3.25f);
+            double number{}; std::memcpy(&number,fixture.last_write.data(),sizeof(number)); Check(number == 3.25,"float32 widened to float64");
+            Reject([&] { entity->SetNumber(*field,std::numeric_limits<float>::infinity()); }, "infinite write refused");
+            field = resolve(14); entity->SetVector(*field,{4,5,6});
+            std::array<float,3> vector{}; std::memcpy(vector.data(),fixture.last_write.data(),sizeof(vector)); Check(vector == std::array<float,3>{4,5,6},"vector layout preserved");
+            Reject([&] { entity->SetVector(*field,{1,2,std::numeric_limits<float>::quiet_NaN()}); }, "nonfinite vector write refused");
+            field = resolve(13); Reject([&] { entity->SetInteger(*field,123); }, "integer writes cannot assign entity references");
+            field = resolve(6); const auto before = fixture.writes;
+            auto foreign = fixture.ServiceFor(2)->Resolve("CTestEntity","value",6);
+            Reject([&] { entity->SetInteger(*foreign,1); }, "foreign field writes refused");
+            fixture.wrong_identity = true; Reject([&] { entity->SetInteger(*field,1); }, "changed identity prevents write"); fixture.wrong_identity = false;
+            Check(fixture.writes == before,"identity failure does not reach write");
+            fixture.write_caps = 0; Reject([&] { entity->SetInteger(*field,1); }, "unsupported capability prevents write"); fixture.write_caps = 1;
+            fixture.caps_status = KEEL_RESULT_UNSUPPORTED; Reject([&] { service->WriteCapabilities(); }, "unsupported binary capability error"); fixture.caps_status = KEEL_RESULT_OK;
+            std::exception_ptr worker_error;
+            std::thread worker([&] { try { Reject([&] { entity->SetInteger(*field,1); }, "worker write refused"); } catch (...) { worker_error = std::current_exception(); } });
+            worker.join(); if (worker_error) std::rethrow_exception(worker_error);
+            const auto recursion_start = fixture.writes;
+            fixture.on_write = [&] { entity->SetInteger(*field,5); };
+            Reject([&] { entity->SetInteger(*field,4); }, "recursive notification bounded"); fixture.on_write = {};
+            Check(fixture.writes == recursion_start + 8,"eight active writes allowed");
+            entity->SetInteger(*field,3);
+            // Host notification may close the very resources used by this call.
+            fixture.on_write = [&] { entity.reset(); field.reset(); };
+            fixture.write_status = KEEL_RESULT_ENGINE_FAILURE;
+            Reject([&] { entity->SetInteger(*field,2); }, "notification failure propagates after resource destruction");
+            fixture.on_write = {}; fixture.write_status = KEEL_RESULT_OK;
+            Check(!entity && !field,"notification destroyed borrowed Entity and Field safely");
+        }
+        {
+            auto read_only = std::make_shared<Service>(1,Fixture::entity_api,Fixture::schema_api,Fixture::player_api,Fixture::runtime_api);
+            auto entity = read_only->Find(4); auto field = read_only->Resolve("CTestEntity","value",6);
+            Check(entity->Integer(*field) == INT32_MIN,"older host still supports reads");
+            Reject([&] { entity->SetInteger(*field,1); }, "older host reports writes unavailable");
+        }
+        Check(fixture.entities.empty() && fixture.fields.empty() && service->EntityCount() == 0 && service->FieldCount() == 0,"write paths release every resource");
         std::cout << "Entity/schema identity, types, metadata, quotas and cleanup checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

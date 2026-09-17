@@ -8,7 +8,7 @@ using source2root::NativeCall;
 namespace sdk = source2root::sdktools;
 class SDKTools final : public source2root::Extension {
 public:
-    static constexpr PluginInfo Info{"Source2Root SDKTools", "KeelS2 Project", "1.0.0", "Owned entity handles and typed schema reads"};
+    static constexpr PluginInfo Info{"Source2Root SDKTools", "KeelS2 Project", "1.0.0", "Owned entity handles and typed schema access"};
     static constexpr PluginRequirement Requirements[]{{"Source2Root", "1.0.0", DependencyRequirement::exact}};
     SDKTools() : Extension("source2root.sdktools") {}
 private:
@@ -23,12 +23,21 @@ private:
         if (api->size != sizeof(T) || api->api_version != version) throw sdk::Error("Incompatible host service table.");
         return *api;
     }
+    const KeelEntityWritesApi* OptionalWrites() {
+        const void* raw = nullptr;
+        const auto result = HostContext().QueryService(KEELS2_ENTITY_WRITES_SERVICE_NAME, KEELS2_ENTITY_WRITES_API_VERSION, &raw);
+        if (result == KEEL_RESULT_NOT_FOUND || result == KEEL_RESULT_UNSUPPORTED) return nullptr;
+        if (result != KEEL_RESULT_OK || !raw) throw sdk::Error("Entity write service query failed.");
+        const auto* api = static_cast<const KeelEntityWritesApi*>(raw);
+        if (api->size != sizeof(*api) || api->api_version != KEELS2_ENTITY_WRITES_API_VERSION) throw sdk::Error("Incompatible entity write service table.");
+        return api;
+    }
     bool OnExtensionStart() override {
         service_ = std::make_shared<sdk::Service>(HostContext().PluginHandle(),
             Require<KeelEntitiesApi>(KEELS2_ENTITIES_SERVICE_NAME, KEELS2_ENTITIES_API_VERSION),
             Require<KeelSchemaApi>(KEELS2_SCHEMA_SERVICE_NAME, KEELS2_SCHEMA_API_VERSION),
             Require<KeelPlayersApi>(KEELS2_PLAYERS_SERVICE_NAME, KEELS2_PLAYERS_API_VERSION),
-            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION));
+            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION), OptionalWrites());
         return RegisterNative("Entity_Find", 1, &SDKTools::Find)
             && RegisterNative("Entity_FromHandle", 1, &SDKTools::FromHandle)
             && RegisterNative("Entity_FromPlayer", 2, &SDKTools::FromPlayer)
@@ -47,7 +56,12 @@ private:
             && RegisterNative("Entity_ReadFloat", 3, &SDKTools::Number)
             && RegisterNative("Entity_ReadVector", 3, &SDKTools::Vector)
             && RegisterNative("Entity_ReadSourceHandle", 3, &SDKTools::ReadHandle)
-            && RegisterNative("Entity_ReadEntity", 2, &SDKTools::ReadEntity);
+            && RegisterNative("Entity_ReadEntity", 2, &SDKTools::ReadEntity)
+            && RegisterNative("Entity_GetWriteCapabilities", 1, &SDKTools::WriteCapabilities)
+            && RegisterNative("Entity_WriteInt", 3, &SDKTools::SetInteger)
+            && RegisterNative("Entity_WriteIntegerText", 3, &SDKTools::SetIntegerText)
+            && RegisterNative("Entity_WriteFloat", 3, &SDKTools::SetNumber)
+            && RegisterNative("Entity_WriteVector", 3, &SDKTools::SetVector);
     }
     template <typename Function> static std::int32_t Invoke(NativeCall& call, Function function, int failure = 0) {
         try { return function(); } catch (const sdk::Error& error) { return call.Fail(error.what(), failure); }
@@ -124,6 +138,25 @@ private:
     std::int32_t ReadHandle(NativeCall& call) {
         call.OutputCell(3, -1);
         return Invoke(call, [&] { call.OutputCell(3, std::bit_cast<std::int32_t>(Entity(call).SourceHandle(Field(call)))); return 1; });
+    }
+    std::int32_t WriteCapabilities(NativeCall& call) {
+        call.OutputCell(1, 0);
+        return Invoke(call, [&] { call.OutputCell(1, service_->WriteCapabilities()); return 1; });
+    }
+    std::int32_t SetInteger(NativeCall& call) {
+        return Invoke(call, [&] { Entity(call).SetInteger(Field(call), call.Int(3)); return 1; });
+    }
+    std::int32_t SetIntegerText(NativeCall& call) {
+        return Invoke(call, [&] { Entity(call).SetIntegerText(Field(call), call.String(3)); return 1; });
+    }
+    std::int32_t SetNumber(NativeCall& call) {
+        return Invoke(call, [&] { Entity(call).SetNumber(Field(call), call.Float(3)); return 1; });
+    }
+    std::int32_t SetVector(NativeCall& call) {
+        return Invoke(call, [&] {
+            const auto cells = call.Array(3, 3);
+            Entity(call).SetVector(Field(call), {std::bit_cast<float>(cells[0]), std::bit_cast<float>(cells[1]), std::bit_cast<float>(cells[2])}); return 1;
+        });
     }
     std::int32_t ReadEntity(NativeCall& call) {
         return Invoke(call, [&] {

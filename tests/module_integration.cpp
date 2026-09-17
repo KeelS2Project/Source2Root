@@ -307,6 +307,17 @@ int main(int argc, char** argv) {
             Check(occurrences("SDKTOOLS_SCRIPT_OK") == 1, "SDKTools compiled script initialization");
             run("sr_sdk_check");
             Check(contains("SDKTOOLS_READ_OK"), "typed schema read via actual script and host");
+            const auto write_count = adapter.Get<unsigned (*)()>("SrFixtureWriteCount");
+            const auto write_state = adapter.Get<void (*)(unsigned,unsigned,bool)>("SrFixtureWriteState");
+            Check(write_count() == 0,"SDKTools initialization has no field writes");
+            run("sr_sdk_write");
+            Check(contains("SDKTOOLS_WRITE_OK") && write_count() == 9,"typed field writes through actual script and host");
+            write_state(0,KEEL_RESULT_OK,false); run("sr_sdk_write_unavailable");
+            Check(contains("SDKTOOLS_WRITE_UNAVAILABLE_OK") && write_count() == 9,"missing capability prevents write");
+            write_state(1,KEEL_RESULT_ENGINE_FAILURE,false); run("sr_sdk_write_error");
+            Check(contains("SDKTOOLS_WRITE_ERROR_OK") && write_count() == 9,"write failure reaches script");
+            write_state(1,KEEL_RESULT_OK,true); run("sr_sdk_write_callback");
+            Check(contains("SDKTOOLS_WRITE_CALLBACK_OK") && write_count() == 11,"nested callback closes active Entity/Field without invalid access");
             run("sr_sdk_wrong");
             Check(contains("Foreign extension or wrong resource type."), "wrong entity resource type raises native error");
             run("sr_sdk_stale");

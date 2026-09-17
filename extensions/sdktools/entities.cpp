@@ -1,6 +1,8 @@
 #include "entities.h"
 #include <keels2/detail/authoring_status.hpp>
 #include <algorithm>
+#include <charconv>
+#include <utility>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -65,10 +67,44 @@ void IntegerType(unsigned type) {
     if (!((type >= KEELS2_SCHEMA_CHAR && type <= KEELS2_SCHEMA_UINT64) || type == KEELS2_SCHEMA_BOOL))
         throw Error("Field is not an integer or boolean.");
 }
+template <typename T> std::array<std::byte, 8> EncodeInteger(const IntegerValue& value) {
+    const auto number = std::visit([](auto source) -> T {
+        if (!std::in_range<T>(source)) throw Error("Integer is outside the schema field's range.");
+        return static_cast<T>(source);
+    }, value);
+    std::array<std::byte, 8> bytes{}; std::memcpy(bytes.data(), &number, sizeof(number)); return bytes;
+}
+std::array<std::byte, 8> IntegerBytes(unsigned type, const IntegerValue& value) {
+    switch (type) {
+        case KEELS2_SCHEMA_CHAR: case KEELS2_SCHEMA_UINT8: return EncodeInteger<std::uint8_t>(value);
+        case KEELS2_SCHEMA_INT8: return EncodeInteger<std::int8_t>(value);
+        case KEELS2_SCHEMA_UINT16: return EncodeInteger<std::uint16_t>(value);
+        case KEELS2_SCHEMA_INT16: return EncodeInteger<std::int16_t>(value);
+        case KEELS2_SCHEMA_UINT32: return EncodeInteger<std::uint32_t>(value);
+        case KEELS2_SCHEMA_INT32: return EncodeInteger<std::int32_t>(value);
+        case KEELS2_SCHEMA_UINT64: return EncodeInteger<std::uint64_t>(value);
+        case KEELS2_SCHEMA_INT64: return EncodeInteger<std::int64_t>(value);
+        case KEELS2_SCHEMA_BOOL:
+            if (!std::visit([](auto number) { return number == 0 || number == 1; }, value)) throw Error("Boolean field requires zero or one.");
+            return EncodeInteger<std::uint8_t>(value);
+        default: throw Error("Field is not an integer or boolean.");
+    }
+}
+IntegerValue ParseInteger(const std::string& text) {
+    if (text.empty() || text.size() > 21) throw Error("Integer text must contain a decimal integer.");
+    const auto parse = [&]<typename T>() -> IntegerValue {
+        T value{};
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (error != std::errc{} || end != text.data() + text.size()) throw Error("Integer text is invalid or outside 64-bit range.");
+        return value;
+    };
+    return text[0] == '-' ? parse.template operator()<std::int64_t>() : parse.template operator()<std::uint64_t>();
+}
+
 }
 Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime)
-    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime) {
+        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes)
+    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime), writes_(writes ? *writes : KeelEntityWritesApi{}) {
     if (!plugin || entities.size != sizeof(entities) || entities.api_version != KEELS2_ENTITIES_API_VERSION ||
         !entities.find_by_index || !entities.find_by_source2_handle || !entities.release || !entities.describe || !entities.equal || !entities.read_field ||
         schema.size != sizeof(schema) || schema.api_version != KEELS2_SCHEMA_API_VERSION ||
@@ -76,8 +112,17 @@ Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const
         players.size != sizeof(players) || players.api_version != KEELS2_PLAYERS_API_VERSION || !players.validate_connection ||
         runtime.size != sizeof(runtime) || runtime.api_version != KEELS2_NATIVE_RUNTIME_API_VERSION || !runtime.check_game_thread)
         throw Error("Incompatible entity/schema/player services.");
+    if (writes && (writes->size != sizeof(*writes) || writes->api_version != KEELS2_ENTITY_WRITES_API_VERSION ||
+        !writes->capabilities || !writes->write_field)) throw Error("Incompatible entity write service.");
 }
 void Service::Thread() const { Check(runtime_.check_game_thread(plugin_), "Entity operation"); }
+unsigned Service::WriteCapabilities() const {
+    Thread();
+    if (!writes_.capabilities) throw Error("Entity write service is unavailable.");
+    unsigned capabilities = 0;
+    Check(writes_.capabilities(plugin_, &capabilities), "Entity write capabilities");
+    return capabilities & KEELS2_ENTITY_WRITE_NUMERIC_FIELDS;
+}
 std::unique_ptr<Entity> Service::Adopt(KeelEntityHandle handle) {
     if (!handle) throw Error("Host returned an empty entity handle.");
     // Allocate the RAII owner before any metadata call; errors release the host
@@ -199,6 +244,43 @@ void Entity::Read(const Field& field, void* output, unsigned size) const {
     Describe();
     Check(service_->entities_.read_field(service_->plugin_, handle_, field.handle_, output, size), "Read entity field");
     Describe();
+}
+void Entity::Write(const Field& field, const void* value, unsigned size) const {
+    // Capture ownership before entering host calls. The notification may invoke
+    // another script callback that closes and destroys this Entity or Field.
+    auto service = service_;
+    const auto entity = handle_, property = field.handle_;
+    const auto expected = identity_;
+    if (!entity || !property) throw Error("Entity or schema field is closed.");
+    if (field.service_ != service || field.size_ != size) throw Error("Schema field belongs to another owner or has a different type.");
+    service->Thread();
+    if (service->active_writes_ >= 8) throw Error("Entity write recursion limit (8) reached.");
+    struct Hold { unsigned& count; explicit Hold(unsigned& value) : count(value) { ++count; } ~Hold() { --count; } } hold(service->active_writes_);
+    if (!(service->WriteCapabilities() & KEELS2_ENTITY_WRITE_NUMERIC_FIELDS)) throw Error("Entity field writes are unsupported by this game build.");
+    KeelEntityInfo current{sizeof(current), -1, KEELS2_INVALID_SOURCE2_ENTITY_HANDLE, 0, 0};
+    Check(service->entities_.describe(service->plugin_, entity, &current), "Validate entity write");
+    if (!Identity(expected, current)) throw Error("Entity identity changed before the write.");
+    // Do not access Entity/Field members after this call, even on failure.
+    Check(service->writes_.write_field(service->plugin_, entity, property, value, size), "Write entity field");
+}
+void Entity::SetInteger(const Field& field, std::int32_t value) const {
+    const auto bytes = IntegerBytes(field.type_, IntegerValue{std::int64_t{value}});
+    Write(field, bytes.data(), field.size_);
+}
+void Entity::SetIntegerText(const Field& field, const std::string& text) const {
+    const auto bytes = IntegerBytes(field.type_, ParseInteger(text));
+    Write(field, bytes.data(), field.size_);
+}
+void Entity::SetNumber(const Field& field, float value) const {
+    if (!std::isfinite(value)) throw Error("Field write requires a finite float.");
+    if (field.type_ == KEELS2_SCHEMA_FLOAT32) Write(field, &value, sizeof(value));
+    else if (field.type_ == KEELS2_SCHEMA_FLOAT64) { const double wide = value; Write(field, &wide, sizeof(wide)); }
+    else throw Error("Field is not floating point.");
+}
+void Entity::SetVector(const Field& field, const std::array<float, 3>& value) const {
+    if (field.type_ != KEELS2_SCHEMA_VECTOR3) throw Error("Field is not a vector.");
+    if (!std::all_of(value.begin(), value.end(), [](float number) { return std::isfinite(number); })) throw Error("Vector write requires finite coordinates.");
+    Write(field, value.data(), sizeof(value));
 }
 std::int32_t Entity::Integer(const Field& field) const {
     IntegerType(field.type_);

@@ -66,6 +66,10 @@ public:
     unsigned management_caps = 7, management_count = 0;
     KeelResult management_cap_status = KEEL_RESULT_OK, management_status = KEEL_RESULT_OK;
     KeelPlayerManagementAction last_management{};
+    unsigned entity_write_caps = 1, entity_write_count = 0;
+    KeelResult entity_write_status = KEEL_RESULT_OK;
+    bool entity_write_callback = false;
+    std::map<std::string,std::vector<std::byte>> written_fields;
     KeelResult ReadPlayer(int slot, KeelPlayerInfo& player) {
         if (lookup != KEEL_RESULT_OK) return lookup;
         if (!connected && slot == 3) return KEEL_RESULT_NOT_FOUND;
@@ -244,6 +248,11 @@ public:
         const auto status = ValidateEntity(entity, error);
         if (status != KEEL_RESULT_OK) return status;
         if (size != field.value_size) return KEEL_RESULT_INVALID_ARGUMENT;
+        const auto saved = written_fields.find(WriteKey(entity,field));
+        if (saved != written_fields.end()) {
+            if (saved->second.size() != size) return KEEL_RESULT_INCOMPATIBLE;
+            std::memcpy(value,saved->second.data(),size); ++entity_reads; return KEEL_RESULT_OK;
+        }
         if (field.field_name == "m_iHealth") { const int32_t data = 73; std::memcpy(value, &data, sizeof(data)); }
         else if (field.field_name == "m_uWide") { const std::uint64_t data = UINT64_MAX; std::memcpy(value, &data, sizeof(data)); }
         else if (field.field_name == "m_vecOrigin") { const float data[]{1, 2, 3}; std::memcpy(value, data, sizeof(data)); }
@@ -252,6 +261,24 @@ public:
         else if (field.field_name == "m_bFlag") { const std::uint8_t data = 1; std::memcpy(value, &data, sizeof(data)); }
         else return KEEL_RESULT_INVALID_ARGUMENT;
         ++entity_reads;
+        return KEEL_RESULT_OK;
+    }
+    static std::string WriteKey(const GameEntityIdentity& entity, const GameSchemaField& field) {
+        return std::to_string(entity.epoch) + ":" + std::to_string(entity.source2_handle) + ":" + field.class_name + "." + field.field_name;
+    }
+    KeelResult WriteEntityField(const GameEntityIdentity& entity, const GameSchemaField& field, const void* value, unsigned size) {
+        std::string error;
+        const auto valid = ValidateEntity(entity,error);
+        if (valid != KEEL_RESULT_OK) return valid;
+        if (!value || !size || size > 12 || size != field.value_size) return KEEL_RESULT_INVALID_ARGUMENT;
+        if (field.value_type == KEELS2_SCHEMA_ENTITY_HANDLE || !(entity_write_caps & 1)) return KEEL_RESULT_UNSUPPORTED;
+        if (entity_write_status != KEEL_RESULT_OK) return entity_write_status;
+        const auto* bytes = static_cast<const std::byte*>(value);
+        written_fields[WriteKey(entity,field)] = {bytes,bytes + size}; ++entity_write_count;
+        if (entity_write_callback) {
+            entity_write_callback = false;
+            if (!Dispatch("sr_sdk_close_active",-1)) return KEEL_RESULT_ENGINE_FAILURE;
+        }
         return KEEL_RESULT_OK;
     }
     bool Dispatch(const char* text, int slot) {
@@ -352,6 +379,29 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureSetConVar(const char* name, 
     return active && name && value && active->SetVariable(name, value);
 }
 
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityWrites(
+    unsigned version, keels2::host::GameAdapterEntityWritesApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),1,
+        [](keels2::host::GameAdapter* adapter, unsigned* capabilities) noexcept -> KeelResult {
+            if (capabilities) *capabilities = 0;
+            if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
+            *capabilities = static_cast<Adapter*>(adapter)->entity_write_caps; return KEEL_RESULT_OK;
+        },
+        [](keels2::host::GameAdapter* adapter, const GameEntityIdentity* entity, const GameSchemaField* field,
+            const void* value, unsigned size) noexcept -> KeelResult {
+            if (!adapter || !entity || !field) return KEEL_RESULT_INVALID_ARGUMENT;
+            try { return static_cast<Adapter*>(adapter)->WriteEntityField(*entity,*field,value,size); }
+            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureWriteState(unsigned capabilities, unsigned status, bool callback) {
+    if (active) { active->entity_write_caps = capabilities; active->entity_write_status = status; active->entity_write_callback = callback; }
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureWriteCount() { return active ? active->entity_write_count : 0; }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerManagement(
     uint32_t version, keels2::host::GameAdapterPlayerManagementApi* api) noexcept {
     if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
