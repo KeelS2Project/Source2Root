@@ -4,6 +4,8 @@
 #include <map>
 #include <thread>
 
+void RunStatisticsChecks();
+
 namespace {
 using source2root::cstrike::Players;
 using source2root::cstrike::Error;
@@ -104,6 +106,7 @@ int main() {
         Check(!actions && !validates && entities.empty(), "wrong-thread rejection precedes lookup");
         auto bad = management; bad.apply = nullptr;
         Fails([&] { Players invalid(owner,entity_api,player_api,runtime,bad); });
+        RunStatisticsChecks();
         std::cout << "Counter-Strike backend checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

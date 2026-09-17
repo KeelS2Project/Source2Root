@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "cstrike_example",
-  "name": "Counter-Strike player actions example",
+  "name": "Counter-Strike player actions and statistics example",
   "author": "KeelS2 Project",
   "version": "1.0.0",
   "api": 2,

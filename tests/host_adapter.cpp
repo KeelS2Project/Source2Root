@@ -211,6 +211,9 @@ public:
         unsigned type = 0, size = 0;
         const std::string classname = spec.class_name, name = spec.field_name;
         if (classname == "CBaseEntity" && name == "m_iHealth") { type = KEELS2_SCHEMA_INT32; size = 4; }
+        if (classname == "CCSPlayerController" && (name == "m_iScore" || name == "m_iMVPs")) {
+            type = KEELS2_SCHEMA_INT32; size = 4;
+        }
         if (classname == "CTestEntity") {
             if (name == "m_uWide") { type = KEELS2_SCHEMA_UINT64; size = 8; }
             if (name == "m_vecOrigin") { type = KEELS2_SCHEMA_VECTOR3; size = 12; }
@@ -248,12 +251,15 @@ public:
         const auto status = ValidateEntity(entity, error);
         if (status != KEEL_RESULT_OK) return status;
         if (size != field.value_size) return KEEL_RESULT_INVALID_ARGUMENT;
+        if (field.class_name == "CCSPlayerController" && entity.source2_handle != 0x12003) return KEEL_RESULT_INCOMPATIBLE;
         const auto saved = written_fields.find(WriteKey(entity,field));
         if (saved != written_fields.end()) {
             if (saved->second.size() != size) return KEEL_RESULT_INCOMPATIBLE;
             std::memcpy(value,saved->second.data(),size); ++entity_reads; return KEEL_RESULT_OK;
         }
         if (field.field_name == "m_iHealth") { const int32_t data = 73; std::memcpy(value, &data, sizeof(data)); }
+        else if (field.field_name == "m_iScore") { const int32_t data = 12; std::memcpy(value, &data, sizeof(data)); }
+        else if (field.field_name == "m_iMVPs") { const int32_t data = 2; std::memcpy(value, &data, sizeof(data)); }
         else if (field.field_name == "m_uWide") { const std::uint64_t data = UINT64_MAX; std::memcpy(value, &data, sizeof(data)); }
         else if (field.field_name == "m_vecOrigin") { const float data[]{1, 2, 3}; std::memcpy(value, data, sizeof(data)); }
         else if (field.field_name == "m_hOther") { const std::uint32_t data = 0x45005; std::memcpy(value, &data, sizeof(data)); }
@@ -271,6 +277,7 @@ public:
         const auto valid = ValidateEntity(entity,error);
         if (valid != KEEL_RESULT_OK) return valid;
         if (!value || !size || size > 12 || size != field.value_size) return KEEL_RESULT_INVALID_ARGUMENT;
+        if (field.class_name == "CCSPlayerController" && entity.source2_handle != 0x12003) return KEEL_RESULT_INCOMPATIBLE;
         if (field.value_type == KEELS2_SCHEMA_ENTITY_HANDLE || !(entity_write_caps & 1)) return KEEL_RESULT_UNSUPPORTED;
         if (entity_write_status != KEEL_RESULT_OK) return entity_write_status;
         const auto* bytes = static_cast<const std::byte*>(value);

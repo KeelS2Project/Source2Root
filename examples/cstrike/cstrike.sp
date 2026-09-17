@@ -3,7 +3,8 @@
 public bool OnPluginStart()
 {
     return RegisterCommand("sr_cs_capabilities", "", Capabilities, "Show supported Counter-Strike player actions")
-        && RegisterCommand("sr_cs_respawn_self", "admin.slay", RespawnSelf, "Respawn your current T/CT pawn");
+        && RegisterCommand("sr_cs_respawn_self", "admin.slay", RespawnSelf, "Respawn your current T/CT pawn")
+        && RegisterCommand("sr_cs_stats", "", Statistics, "Show your current CS2 score and MVP count");
 }
 public void Capabilities(Player caller, const char[] arguments)
 {
@@ -19,4 +20,13 @@ public void RespawnSelf(Player caller, const char[] arguments)
     if (caller == NoPlayer) { ReplyToCommand(caller, "Use this command as a connected T/CT player."); return; }
     if (CS_RespawnPlayer(caller)) ReplyToCommand(caller, "Respawn dispatched.");
     else { char error[256]; GetLastError(error, sizeof(error)); ReplyToCommand(caller, error); }
+}
+public void Statistics(Player caller, const char[] arguments)
+{
+    if (caller == NoPlayer) { ReplyToCommand(caller, "Use this command as a connected player."); return; }
+    int score, mvps;
+    char text[256];
+    if (!CS_GetPlayerScore(caller, score) || !CS_GetPlayerMVPs(caller, mvps)) GetLastError(text, sizeof(text));
+    else Format(text, sizeof(text), "CS2 score=%d, MVPs=%d", score, mvps);
+    ReplyToCommand(caller, text);
 }
