@@ -65,7 +65,17 @@ public void Saved(PrefRequest request, Player player, any data, const char[] err
         !Prefs_GetTime(player, cookies[0], timestamp, sizeof(timestamp)) || timestamp[0] == '0') {
         LogMessage("PREFS_FAILED_SAVE"); return;
     }
-    LogMessage("PREFS_SCRIPT_OK");
+    if (!Prefs_Refresh(player) || Prefs_IsCached(player) || !Prefs_WhenCached(player, Refreshed))
+        LogMessage("PREFS_FAILED_REFRESH");
+}
+
+public void Refreshed(PrefRequest request, Player player, any data, const char[] error)
+{
+    Prefs_CloseRequest(request);
+    char value[256];
+    if (error[0] || !Prefs_IsCached(player) || !Prefs_Get(player, cookies[0], value, sizeof(value)) || value[0] != 'l')
+        LogMessage("PREFS_FAILED_REFRESH_CACHE");
+    else LogMessage("PREFS_SCRIPT_OK");
 }
 
 public void Pending(Player caller, const char[] arguments)

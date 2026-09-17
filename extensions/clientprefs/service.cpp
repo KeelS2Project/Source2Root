@@ -13,13 +13,16 @@ std::string Message(std::exception_ptr error) {
 }
 }
 
-Service::Service(std::filesystem::path filename) : filename_(std::move(filename)) {
+Service::Service(std::filesystem::path filename)
+    : Service([filename = std::move(filename)] { return std::make_unique<Store>(filename); }) {}
+Service::Service(StorageFactory storage) : storage_(std::move(storage)) {
+    if (!storage_) throw Error("Missing client preferences storage factory.");
     LoadCatalog();
 }
 void Service::LoadCatalog() {
     auto catalog = std::make_shared<std::vector<Definition>>();
-    const auto path = filename_;
-    if (!Submit([path, catalog] { *catalog = Store(path).Catalog(); }, [this, catalog](auto failure) {
+    const auto storage = storage_;
+    if (!Submit([storage, catalog] { *catalog = storage()->Catalog(); }, [this, catalog](auto failure) {
         catalog_error_ = Message(failure);
         catalog_state_ = failure ? State::Failed : State::Ready;
         if (!failure) for (const auto& definition : *catalog) {
@@ -75,8 +78,8 @@ std::shared_ptr<Cookie> Service::Register(const Definition& definition) {
     } else if (cookies_.size() == MaxCookies) throw Error("Client preferences catalog limit (256) reached.");
     auto cookie = Find(definition.name);
     if (!cookie) cookie = std::make_shared<Cookie>(Cookie{definition, State::Loading, {}});
-    const auto path = filename_;
-    if (!Submit([path, definition] { Store(path).Register(definition); }, [this, cookie](auto error) {
+    const auto storage = storage_;
+    if (!Submit([storage, definition] { storage()->Register(definition); }, [this, cookie](auto error) {
         cookie->error = Message(error); cookie->state = error ? State::Failed : State::Ready;
         if (error && Find(cookie->definition.name) == cookie) cookies_.erase(cookie->definition.name);
     })) throw Error("Client preferences worker queue is full.");
@@ -168,9 +171,9 @@ bool Service::Persisted(const Identity& player) const {
 }
 void Service::Load(std::uint64_t id, const std::shared_ptr<Account>& account) {
     if (account->loading) return;
-    const auto path = filename_;
+    const auto storage = storage_;
     auto values = std::make_shared<Values>();
-    if (!Submit([path, id, values] { *values = Store(path).Load(id); }, [account, values](auto error) {
+    if (!Submit([storage, id, values] { *values = storage()->Load(id); }, [account, values](auto error) {
         account->loading = false;
         account->error = Message(error);
         account->state = error ? State::Failed : State::Ready;
@@ -186,11 +189,18 @@ void Service::RetryLoad(const Identity& player) {
     if (account->state == State::Failed) Load(player.account, account);
 }
 
+void Service::Refresh(const Identity& player) {
+    const auto account = Current(player);
+    if (account->loading || account->saving || !account->dirty.empty())
+        throw Error("Client preferences refresh requires a clean, idle cache.");
+    Load(player.account, account);
+}
+
 void Service::Save(std::uint64_t id, const std::shared_ptr<Account>& account) {
     if (account->saving || account->write_failed || account->dirty.empty()) return;
-    const auto path = filename_;
+    const auto storage = storage_;
     const auto batch = account->dirty;
-    if (!Submit([path, id, batch] { Store(path).Save(id, batch); }, [account, batch](auto error) {
+    if (!Submit([storage, id, batch] { storage()->Save(id, batch); }, [account, batch](auto error) {
         account->saving = false;
         account->error = Message(error);
         account->write_failed = bool(error);

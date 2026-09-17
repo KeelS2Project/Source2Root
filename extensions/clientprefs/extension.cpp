@@ -86,6 +86,7 @@ private:
             && RegisterNative("Prefs_WhenSaved", 3, &ClientPreferences::WhenSaved)
             && RegisterNative("Prefs_CloseRequest", 1, &ClientPreferences::CloseRequest)
             && RegisterNative("Prefs_Retry", 1, &ClientPreferences::Retry)
+            && RegisterNative("Prefs_Refresh", 1, &ClientPreferences::Refresh)
             && RegisterNative("Prefs_UserCookieCount", 0, &ClientPreferences::UserCookieCount)
             && RegisterNative("Prefs_UserCookieName", 3, &ClientPreferences::UserCookieName)
             && RegisterNative("Prefs_UserSet", 3, &ClientPreferences::UserSet)
@@ -106,11 +107,15 @@ private:
     }
     template <typename Function> std::int32_t Invoke(NativeCall& call, Function function, std::int32_t failure = 0) {
         try {
-            if (!service_) service_ = std::make_unique<prefs::Service>(std::filesystem::path(call.DataPath(true)) / "clientprefs.sqlite");
+            if (!service_) service_ = std::make_unique<prefs::Service>(prefs::ConfiguredStorage(
+                call.DataPath(true), std::filesystem::path(call.ConfigPath()) / "databases.json"));
             Sync();
             return function();
         } catch (const prefs::Error& error) { return call.Fail(error.what(), failure); }
         catch (const std::filesystem::filesystem_error&) { return call.Fail("Client preferences data directory is unavailable.", failure); }
+    }
+    std::int32_t Refresh(NativeCall& call) {
+        return Invoke(call, [&] { service_->Refresh(Player(call)); return 1; });
     }
     static prefs::Identity Identity(const SrPlayerIdentity& player) {
         if (!player.authenticated || player.bot) throw prefs::Error("Client preferences require an authenticated human player.");

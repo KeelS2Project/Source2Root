@@ -4,6 +4,13 @@
 #define _source2root_clientprefs_included
 #include <source2root>
 
+// Storage defaults to data/extensions/source2root.clientprefs/clientprefs.sqlite.
+// An optional configs/extensions/source2root.clientprefs/databases.json selects
+// profile "clientprefs" (SQLite or MySQL/MariaDB), allowing source2root.clientprefs.
+// Configuration is read on workers; credentials/CA can be repaired then retried.
+// Changing the database target requires draining writes and reloading the
+// extension. A missing/broken remote configuration never falls back to SQLite.
+
 enum PrefCookie { NoPrefCookie = 0 }
 enum PrefRequest { NoPrefRequest = 0 }
 enum PrefAccess { Pref_Public, Pref_Protected, Pref_Private }
@@ -36,7 +43,7 @@ native bool Prefs_IsCached(Player player);
 native bool Prefs_Get(Player player, PrefCookie cookie, char[] output, int capacity);
 // Success acknowledges the cache only. Accepted writes survive script unload
 // and player disconnect; failures stay dirty. Use WhenSaved/IsSaved to observe
-// successful SQLite commit. A process crash can lose uncommitted cache changes.
+// successful database commit. A process crash can lose uncommitted cache changes.
 native bool Prefs_Set(Player player, PrefCookie cookie, const char[] value);
 native bool Prefs_IsSaved(Player player);
 // Decimal Unix seconds, including timestamps beyond a 32-bit SourcePawn cell.
@@ -51,6 +58,11 @@ native bool Prefs_CloseRequest(PrefRequest request);
 // storage. A player also retries that account's failed load. NoPlayer supports
 // operator recovery with nobody connected. Unload refuses accepted dirty writes.
 native bool Prefs_Retry(Player player = NoPlayer);
+// Shared SQL storage synchronizes durable values, not live caches. Refresh or
+// reconnect to observe another server's changes. Refresh refuses pending/dirty
+// writes, marks the cache loading, and completes via WhenCached. Same-cookie
+// writes use last committed value; unrelated cookies are never overwritten.
+native bool Prefs_Refresh(Player player);
 
 // Player settings interfaces must use these access-aware operations: public
 // values are visible/writable, protected visible/read-only, private hidden.

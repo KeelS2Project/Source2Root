@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "connections": {
+    "clientprefs": {
+      "driver": "mysql",
+      "database": "source2root",
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "source2root",
+      "password": "replace-with-operator-secret",
+      "tls": true,
+      "ca": "/absolute/path/to/database-ca.pem",
+      "timeout": 3,
+      "allow_plugins": ["source2root.clientprefs"]
+    }
+  }
+}

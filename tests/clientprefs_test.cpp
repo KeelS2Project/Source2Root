@@ -24,7 +24,7 @@ const Definition Public{"music", "Music preference", Access::Public};
 const Definition Protected{"rank", "Server-managed rank", Access::Protected};
 const Definition Private{"internal", "Internal value", Access::Private};
 
-static void Storage(const std::filesystem::path& root) {
+static void StorageChecks(const std::filesystem::path& root) {
     const auto path = root / "prefs.sqlite";
     {
         Store store(path);
@@ -79,6 +79,15 @@ static void Cache(const std::filesystem::path& root) {
         Check(service.Get(first, music).text == "latest" && !service.Persisted(first), "cache acknowledgement is not durability acknowledgement");
         Until(service, [&] { return service.Persisted(first); });
         Check(Store(path).Load(First).at(Public.name).text == "latest", "newer edit survives an older in-flight save completion");
+        Store(path).Save(First, {{Public.name, {"external", 8}}});
+        Check(service.Get(first, music).text == "latest", "another writer does not mutate live caches");
+        service.Refresh(first);
+        Reject([&] { service.Set(first, music, "during-refresh", 8); }, "writes refused while refresh loads");
+        Until(service, [&] { return service.Status(first) == State::Ready; });
+        Check(service.Get(first, music).text == "external", "refresh reads another writer's durable value");
+        service.Set(first, music, "latest", 9);
+        Reject([&] { service.Refresh(first); }, "refresh cannot discard accepted pending writes");
+        Until(service, [&] { return service.Persisted(first); });
         bool wrong_thread = false;
         std::thread worker([&] { try { service.Find("music"); } catch (const std::logic_error&) { wrong_thread = true; } });
         worker.join();
@@ -199,7 +208,7 @@ int main(int argc, char** argv) {
         const std::filesystem::path root(argv[2]);
         std::filesystem::remove_all(root);
         std::filesystem::create_directories(root);
-        if (std::string(argv[1]) == "storage") Storage(root);
+        if (std::string(argv[1]) == "storage") StorageChecks(root);
         else if (std::string(argv[1]) == "cache") Cache(root);
         else if (std::string(argv[1]) == "menus") Menus(root);
         else throw std::runtime_error("Unknown test mode.");

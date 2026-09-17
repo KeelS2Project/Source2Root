@@ -141,6 +141,10 @@ if(BUILD_TESTING)
     if(SR_DATABASE_EXTENSION)
         add_executable(sr_clientprefs_test tests/clientprefs_test.cpp)
         target_link_libraries(sr_clientprefs_test PRIVATE sr_clientprefs)
+        add_executable(sr_clientprefs_configured_test tests/clientprefs_configured_test.cpp)
+        target_link_libraries(sr_clientprefs_configured_test PRIVATE sr_clientprefs)
+        target_include_directories(sr_clientprefs_configured_test PRIVATE "${SR_JSON_INCLUDE}")
+        add_test(NAME clientprefs_configuration COMMAND sr_clientprefs_configured_test "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-configured")
         add_test(NAME clientprefs_storage COMMAND sr_clientprefs_test storage "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-storage")
         add_test(NAME clientprefs_cache COMMAND sr_clientprefs_test cache "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-cache")
         add_test(NAME clientprefs_menus COMMAND sr_clientprefs_test menus "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-menus")
@@ -168,6 +172,8 @@ if(BUILD_TESTING)
             set(SR_DATABASE_TEST_CONFIG "" CACHE FILEPATH "Private configuration for opt-in database integration tests")
             set(SR_DATABASE_TEST_BAD_CA "" CACHE FILEPATH "Untrusted CA for database TLS integration tests")
             if(SR_DATABASE_TEST_CONFIG AND SR_DATABASE_TEST_BAD_CA)
+                add_test(NAME clientprefs_mysql COMMAND sr_clientprefs_configured_test "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-mysql" "${SR_DATABASE_TEST_CONFIG}")
+                set_tests_properties(clientprefs_mysql PROPERTIES TIMEOUT 60 RESOURCE_LOCK shared_database)
                 add_test(NAME mysql_driver COMMAND sr_mysql_test "${SR_DATABASE_TEST_CONFIG}" "${SR_DATABASE_TEST_BAD_CA}")
                 set_tests_properties(mysql_driver PROPERTIES TIMEOUT 30)
             endif()
@@ -278,6 +284,15 @@ if(BUILD_TESTING)
                 "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/clientprefs.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
                 "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-module" "clientprefs" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(clientprefs_native_module PROPERTIES TIMEOUT 30)
+            if(SR_MYSQL_DRIVER AND SR_DATABASE_TEST_CONFIG)
+                add_test(NAME clientprefs_mysql_module COMMAND sr_module_integration
+                    "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
+                    $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_clientprefs>
+                    "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/clientprefs.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+                    "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-mysql-module" "clientprefs_mysql" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
+                set_tests_properties(clientprefs_mysql_module PROPERTIES TIMEOUT 60 RESOURCE_LOCK shared_database
+                    ENVIRONMENT "SR_DATABASE_TEST_CONFIG=${SR_DATABASE_TEST_CONFIG}")
+            endif()
             add_test(NAME database_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
                 $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_database>

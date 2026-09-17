@@ -1,6 +1,7 @@
 #include "mysql_driver.h"
 #include <chrono>
 #include <iostream>
+#include <thread>
 
 using namespace source2root;
 static void Check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -53,6 +54,37 @@ int main(int argc, char** argv) {
         Reject([&] { mysql::Query(config, insert, canceled); }, "canceled query never executes");
         canceled = false;
         Check(run("SELECT count(*) FROM source2root_driver_checks").rows[0][0].integer == 1, "canceled write not committed");
+        {
+            mysql::Session session(config, canceled);
+            session.Execute(insert);
+            bool refused = false;
+            std::thread foreign([&] { try { session.Execute({"SELECT 1", {}}); } catch (const db::Error&) { refused = true; } });
+            foreign.join();
+            Check(refused, "session refuses another thread without damaging owner transaction");
+            session.Execute(insert);
+            session.Commit();
+        }
+        Check(run("SELECT count(*) FROM source2root_driver_checks").rows[0][0].integer == 3, "multi-statement transaction commits atomically");
+        {
+            mysql::Session session(config, canceled);
+            session.Execute(insert);
+        }
+        Check(run("SELECT count(*) FROM source2root_driver_checks").rows[0][0].integer == 3, "destroying uncommitted session rolls back");
+        {
+            mysql::Session session(config, canceled);
+            session.Execute(insert);
+            Reject([&] { session.Execute({"SELECT * FROM missing_table", {}}); }, "query failure poisons transaction");
+            Reject([&] { session.Commit(); }, "failed session cannot commit earlier writes");
+        }
+        Check(run("SELECT count(*) FROM source2root_driver_checks").rows[0][0].integer == 3, "failed transaction rolls back earlier writes");
+        {
+            mysql::Session session(config, canceled);
+            session.Execute(insert);
+            canceled = true;
+            Reject([&] { session.Commit(); }, "cancel before commit aborts session");
+            canceled = false;
+        }
+        Check(run("SELECT count(*) FROM source2root_driver_checks").rows[0][0].integer == 3, "canceled transaction rolled back");
         const auto start = std::chrono::steady_clock::now();
         Reject([&] { run("SELECT SLEEP(4)"); }, "finite network read timeout");
         Check(std::chrono::steady_clock::now() - start < std::chrono::seconds(6), "timeout bounds client wait");

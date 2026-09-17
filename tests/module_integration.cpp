@@ -105,6 +105,13 @@ int main(int argc, char** argv) {
         Copy(argv[8], script / "plugins/hello/plugin.json");
         std::filesystem::remove(script / "logs/source2root.log");
         std::filesystem::create_directories(script / "configs");
+        if (argc == 12 && std::string(argv[10]) == "clientprefs_mysql") {
+            const auto* config = std::getenv("SR_DATABASE_TEST_CONFIG");
+            Check(config && *config, "shared preferences fixture requires private configuration");
+            const auto file = script / "configs/extensions/source2root.clientprefs/databases.json";
+            Copy(config, file);
+            std::filesystem::permissions(file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+        }
         if (argc == 12 && std::string(argv[10]) == "database_configured") {
             const auto file = script / "configs/extensions/source2root.database/databases.json";
             if (const auto* config = std::getenv("SR_DATABASE_TEST_CONFIG"); config && *config) {
@@ -184,7 +191,7 @@ int main(int argc, char** argv) {
             return 0;
         }
 #if defined(SR_PREFS_TEST)
-        if (argc == 12 && std::string(argv[10]) == "clientprefs") {
+        if (argc == 12 && (std::string(argv[10]) == "clientprefs" || std::string(argv[10]) == "clientprefs_mysql")) {
             auto authentication = adapter.Get<void (*)(bool, bool)>("SrFixtureAuthentication");
             auto player_lookup = adapter.Get<void (*)(KeelResult)>("SrFixturePlayerLookup");
             auto occurrences = [&](const char* text) {
@@ -268,7 +275,9 @@ int main(int argc, char** argv) {
             run("sr plugins unload hello");
             await([&] { return stop(); });
             Check(!contains("PREFS_FAILED") && !contains("PREFS_UNEXPECTED_CALLBACK"), "preferences ownership, cache and save callbacks isolated by script generation");
-            const auto values = source2root::prefs::Store(script / "data/extensions/source2root.clientprefs/clientprefs.sqlite").Load(76561197960265851ULL);
+            const auto storage = source2root::prefs::ConfiguredStorage(script / "data/extensions/source2root.clientprefs",
+                script / "configs/extensions/source2root.clientprefs/databases.json");
+            const auto values = storage()->Load(76561197960265851ULL);
             Check(values.at("music").text == "on-unload", "accepted preference write committed after script unload before host stop");
             Check(network_stop(), "preferences fixture teardown");
             std::cout << messages() << "Client preferences module lifecycle passed\n";

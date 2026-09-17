@@ -26,6 +26,7 @@ struct Cookie {
 class Service final {
 public:
     explicit Service(std::filesystem::path filename);
+    explicit Service(StorageFactory storage);
     ~Service();
     Service(const Service&) = delete;
     Service& operator=(const Service&) = delete;
@@ -43,6 +44,7 @@ public:
     void UserSet(const Identity& player, const std::string& name, const std::string& text, std::int64_t now);
     bool Persisted(const Identity& player) const;
     void RetryLoad(const Identity& player);
+    void Refresh(const Identity& player);
     void RetryCatalog();
     void RetryWrites();
     bool CanStop();
@@ -57,7 +59,7 @@ private:
     };
     struct Task { std::unique_ptr<WorkQueue::Ticket> ticket; bool done = false; };
     const std::thread::id owner_ = std::this_thread::get_id();
-    std::filesystem::path filename_;
+    StorageFactory storage_;
     State catalog_state_ = State::Loading;
     std::string catalog_error_;
     std::map<std::string, std::shared_ptr<Cookie>> cookies_;
