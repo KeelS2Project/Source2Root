@@ -255,6 +255,44 @@ int main(int argc, char** argv) {
             std::cout << messages() << "HTTP native and script module lifecycle passed\n";
             return 0;
         }
+        if (argc == 12 && std::string(argv[10]) == "sdktools") {
+            auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned count = 0; std::size_t at = 0;
+                while ((at = log.find(value, at)) != std::string::npos) { ++count; at += std::strlen(value); }
+                return count;
+            };
+            Check(occurrences("SDKTOOLS_SCRIPT_OK") == 1, "SDKTools compiled script initialization");
+            run("sr_sdk_check");
+            Check(contains("SDKTOOLS_READ_OK"), "typed schema read via actual script and host");
+            run("sr_sdk_wrong");
+            Check(contains("Foreign extension or wrong resource type."), "wrong entity resource type raises native error");
+            run("sr_sdk_stale");
+            Check(contains("stale, foreign or wrong-type handle"), "closed entity resource raises native error");
+            adapter.Get<void (*)()>("SrFixtureEntityEpoch")();
+            run("sr_sdk_epoch");
+            Check(contains("SDKTOOLS_EPOCH_OK"), "old entity epoch refused and new lookup succeeds");
+            reconnect();
+            run("sr_sdk_player");
+            Check(contains("SDKTOOLS_PLAYER_CHANGED_OK"), "stale player handle cannot select new connection pawn");
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked"), "script retains SDKTools provider");
+            run("sr plugins pause hello");
+            run("sr plugins resume hello");
+            run("sr plugins reload hello");
+            run("sr_sdk_check");
+            Check(occurrences("SDKTOOLS_SCRIPT_OK") == 2 && !contains("SDKTOOLS_FAILED"), "script reload succeeds with new generation and releases old resources");
+            run("sr plugins unload hello");
+            run("keel plugins unload 2");
+            run("keel plugins load sr_example");
+            run("sr plugins load hello");
+            run("sr_sdk_check");
+            Check(occurrences("SDKTOOLS_SCRIPT_OK") == 3 && !contains("SDKTOOLS_FAILED"), "SDKTools provider reload rebinds script natives");
+            run("sr plugins unload hello");
+            Check(stop(), "SDKTools host stop after script cleanup");
+            Check(network_stop(), "SDKTools fixture teardown");
+            std::cout << messages() << "SDKTools native module lifecycle passed\n";
+            return 0;
+        }
         if (argc == 12 && std::string(argv[10]) == "regex") {
             auto occurrences = [&](const char* value) {
                 const std::string log = messages(); unsigned count = 0; std::size_t at = 0;

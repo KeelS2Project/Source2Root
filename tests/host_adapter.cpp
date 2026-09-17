@@ -58,6 +58,7 @@ public:
     bool fail_restart = false;
     std::string kick_reason;
     uint32_t pawn_handle = 0x23004;
+    std::uint64_t entity_epoch = 1;
     KeelResult action_status = KEEL_RESULT_OK;
     std::uint64_t input_buttons = 0, input_context = 1;
     KeelResult input_status = KEEL_RESULT_OK;
@@ -200,17 +201,31 @@ public:
         return false;
     }
     KeelResult ResolveSchemaField(const KeelSchemaFieldSpec& spec, GameSchemaField& field, std::string&) override {
-        if (std::string(spec.class_name) != "CBaseEntity" || std::string(spec.field_name) != "m_iHealth" ||
-            spec.value_type != KEELS2_SCHEMA_INT32) return KEEL_RESULT_NOT_FOUND;
-        field.declaring_class = this; field.offset = 12; field.value_size = 4; field.value_alignment = 4;
-        field.module = KEELS2_SCHEMA_MODULE_SERVER; field.value_type = KEELS2_SCHEMA_INT32;
+        unsigned type = 0, size = 0;
+        const std::string classname = spec.class_name, name = spec.field_name;
+        if (classname == "CBaseEntity" && name == "m_iHealth") { type = KEELS2_SCHEMA_INT32; size = 4; }
+        if (classname == "CTestEntity") {
+            if (name == "m_uWide") { type = KEELS2_SCHEMA_UINT64; size = 8; }
+            if (name == "m_vecOrigin") { type = KEELS2_SCHEMA_VECTOR3; size = 12; }
+            if (name == "m_hOther") { type = KEELS2_SCHEMA_ENTITY_HANDLE; size = 4; }
+            if (name == "m_fValue") { type = KEELS2_SCHEMA_FLOAT32; size = 4; }
+            if (name == "m_bFlag") { type = KEELS2_SCHEMA_BOOL; size = 1; }
+        }
+        if (!type) return KEEL_RESULT_NOT_FOUND;
+        if (spec.value_type != type) return KEEL_RESULT_INCOMPATIBLE;
+        field.declaring_class = this; field.offset = name == "m_iHealth" ? 12 : 16;
+        field.value_size = size; field.value_alignment = size == 12 ? 4 : size;
+        field.module = KEELS2_SCHEMA_MODULE_SERVER; field.value_type = type;
         field.class_name = spec.class_name; field.field_name = spec.field_name;
+        field.module_name = "server"; field.compatibility_profile = "source2root-headless-fixture";
         return KEEL_RESULT_OK;
     }
-    KeelResult FindEntityByIndex(int32_t, GameEntityIdentity&, std::string&) override { return KEEL_RESULT_UNSUPPORTED; }
+    KeelResult FindEntityByIndex(int32_t index, GameEntityIdentity& entity, std::string& error) override {
+        return FindEntityBySource2Handle(index == 3 ? 0x12003 : index == 4 ? 0x23004 : index == 5 ? 0x45005 : 0, entity, error);
+    }
     KeelResult FindEntityBySource2Handle(uint32_t handle, GameEntityIdentity& entity, std::string&) override {
-        if (handle != 0x23004) return KEEL_RESULT_NOT_FOUND;
-        entity = {4, handle, 1};
+        if (handle != 0x23004 && handle != 0x12003 && handle != 0x45005) return KEEL_RESULT_NOT_FOUND;
+        entity = {handle == 0x12003 ? 3 : handle == 0x23004 ? 4 : 5, handle, entity_epoch};
         if (mutate_pawn == 1) pawn_handle = 0x24004;
         if (mutate_pawn == 2) ++user_id;
         if (mutate_pawn == 3) player_alive = false;
@@ -218,14 +233,22 @@ public:
         return KEEL_RESULT_OK;
     }
     KeelResult ValidateEntity(const GameEntityIdentity& entity, std::string&) override {
-        if (entity.source2_handle != 0x23004 || entity.epoch != 1) return KEEL_RESULT_NOT_FOUND;
+        if ((entity.source2_handle != 0x23004 && entity.source2_handle != 0x12003 && entity.source2_handle != 0x45005) ||
+            entity.epoch != entity_epoch) return KEEL_RESULT_NOT_FOUND;
         return entity_status;
     }
     KeelResult ReadEntityField(const GameEntityIdentity& entity, const GameSchemaField& field, void* value, uint32_t size, std::string& error) override {
         const auto status = ValidateEntity(entity, error);
         if (status != KEEL_RESULT_OK) return status;
-        if (field.field_name != "m_iHealth" || size != 4) return KEEL_RESULT_INVALID_ARGUMENT;
-        const int32_t health = 73; std::memcpy(value, &health, sizeof(health)); ++entity_reads;
+        if (size != field.value_size) return KEEL_RESULT_INVALID_ARGUMENT;
+        if (field.field_name == "m_iHealth") { const int32_t data = 73; std::memcpy(value, &data, sizeof(data)); }
+        else if (field.field_name == "m_uWide") { const std::uint64_t data = UINT64_MAX; std::memcpy(value, &data, sizeof(data)); }
+        else if (field.field_name == "m_vecOrigin") { const float data[]{1, 2, 3}; std::memcpy(value, data, sizeof(data)); }
+        else if (field.field_name == "m_hOther") { const std::uint32_t data = 0x45005; std::memcpy(value, &data, sizeof(data)); }
+        else if (field.field_name == "m_fValue") { const float data = 1.25f; std::memcpy(value, &data, sizeof(data)); }
+        else if (field.field_name == "m_bFlag") { const std::uint8_t data = 1; std::memcpy(value, &data, sizeof(data)); }
+        else return KEEL_RESULT_INVALID_ARGUMENT;
+        ++entity_reads;
         return KEEL_RESULT_OK;
     }
     bool Dispatch(const char* text, int slot) {
@@ -411,6 +434,7 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureKickState(bool available, bo
     active->connected = true;
 }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureKicks() { return active ? active->kicks : 0; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureEntityEpoch() { if (active) ++active->entity_epoch; }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT const char* SrFixtureKickReason() { return active ? active->kick_reason.c_str() : ""; }
 
 extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureReadListening(int receiver, int sender) { return SrEngineReadListening(receiver, sender); }
