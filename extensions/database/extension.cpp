@@ -1,5 +1,9 @@
 #include "database.h"
 #include "query.h"
+#include "settings.h"
+#if defined(SR_MYSQL_DRIVER)
+#include "mysql_driver.h"
+#endif
 #include <source2root/extension.hpp>
 #include <source2root/work_queue.hpp>
 
@@ -22,7 +26,7 @@ public:
     DatabaseExtension() : Extension("source2root.database") {}
     void OnGameFrame(bool, bool, bool) override { if (queue_) queue_->Dispatch(); }
 private:
-    static constexpr std::uint32_t ConnectionType = 1, StatementType = 2, RequestType = 3;
+    static constexpr std::uint32_t ConnectionType = 1, StatementType = 2, RequestType = 3, QueryType = 4;
     struct Result {
         source2root::sqlite::QueryResult query;
         std::string error;
@@ -79,7 +83,15 @@ private:
             && RegisterNative("SQL_ResultFloat", 4, &DatabaseExtension::ResultFloat)
             && RegisterNative("SQL_ResultString", 5, &DatabaseExtension::ResultString)
             && RegisterNative("SQL_ResultChanges", 1, &DatabaseExtension::ResultChanges)
-            && RegisterNative("SQL_ResultInsertId", 3, &DatabaseExtension::ResultInsertId);
+            && RegisterNative("SQL_ResultInsertId", 3, &DatabaseExtension::ResultInsertId)
+            && RegisterNative("SQL_CreateQuery", 1, &DatabaseExtension::CreateQuery)
+            && RegisterNative("SQL_CloseQuery", 1, &DatabaseExtension::CloseQuery)
+            && RegisterNative("SQL_QueryBindInt", 3, &DatabaseExtension::QueryBindInt)
+            && RegisterNative("SQL_QueryBindFloat", 3, &DatabaseExtension::QueryBindFloat)
+            && RegisterNative("SQL_QueryBindString", 3, &DatabaseExtension::QueryBindString)
+            && RegisterNative("SQL_QueryBindNull", 2, &DatabaseExtension::QueryBindNull)
+            && RegisterNative("SQL_ExecuteSQLiteAsync", 4, &DatabaseExtension::ExecuteSQLiteAsync)
+            && RegisterNative("SQL_ExecuteAsync", 4, &DatabaseExtension::ExecuteAsync);
     }
     template <typename Function>
     static std::int32_t Sql(NativeCall& call, Function function, std::int32_t failure = 0) {
@@ -108,31 +120,80 @@ private:
         return Sql(call, [&] {
             const auto filename = Filename(call);
             const auto sql = call.String(2);
-            const auto data = call.Int(4);
-            // Start workers only after this module has successfully loaded.
-            if (!queue_) queue_ = std::make_unique<source2root::WorkQueue>(1, 32);
-            auto result = std::make_shared<Result>();
-            auto request = std::make_unique<Request>();
-            request->extension = this;
-            request->callback = call.Callback(3);
-            request->result = result;
-            const auto callback = request->callback;
-            request->ticket = queue_->Submit([result, filename, sql](const auto& canceled) {
-                result->query = source2root::sqlite::Query(filename, sql, canceled);
-            }, [this, result, callback, data](std::exception_ptr error) {
-                if (!result->ready) {
-                    if (error) {
-                        try { std::rethrow_exception(error); }
-                        catch (const std::exception& failure) { result->error = std::string(failure.what()).substr(0, 4095); }
-                        catch (...) { result->error = "Database worker failed."; }
-                    }
-                    result->ready = true;
+            return Submit(call, [filename, sql](const auto& canceled) { return source2root::sqlite::Query(filename, sql, canceled); });
+        });
+    }
+    std::int32_t Submit(NativeCall& call, std::function<source2root::db::QueryResult(const std::atomic_bool&)> work) {
+        const auto data = call.Int(4);
+        // Start workers only after this module has successfully loaded.
+        if (!queue_) queue_ = std::make_unique<source2root::WorkQueue>(1, 32);
+        auto result = std::make_shared<Result>();
+        auto request = std::make_unique<Request>();
+        request->extension = this;
+        request->callback = call.Callback(3);
+        request->result = result;
+        const auto callback = request->callback;
+        request->ticket = queue_->Submit([result, work = std::move(work)](const auto& canceled) {
+            result->query = work(canceled);
+        }, [this, result, callback, data](std::exception_ptr error) {
+            if (!result->ready) {
+                if (error) {
+                    try { std::rethrow_exception(error); }
+                    catch (const std::exception& failure) { result->error = std::string(failure.what()).substr(0, 4095); }
+                    catch (...) { result->error = "Database worker failed."; }
                 }
-                return DeliverCallback(callback, {result->handle, data}, result->error.c_str()) != KEEL_RESULT_BUSY;
+                result->ready = true;
+            }
+            return DeliverCallback(callback, {result->handle, data}, result->error.c_str()) != KEEL_RESULT_BUSY;
+        });
+        if (!request->ticket) return call.Fail("Database queue is full (32 requests).");
+        result->handle = call.Own(RequestType, std::move(request));
+        return result->handle;
+    }
+    static source2root::db::QueryInput& Input(NativeCall& call, unsigned index = 1) {
+        return call.Resource<source2root::db::QueryInput>(call.Int(index), QueryType);
+    }
+    std::int32_t CreateQuery(NativeCall& call) {
+        return Sql(call, [&] {
+            auto input = std::make_unique<source2root::db::QueryInput>();
+            input->sql = call.String(1);
+            input->Validate();
+            return call.Own(QueryType, std::move(input));
+        });
+    }
+    std::int32_t CloseQuery(NativeCall& call) { call.Close(call.Int(1), QueryType); return 1; }
+    std::int32_t QueryBindInt(NativeCall& call) { return Sql(call, [&] { Input(call).Bind(call.Int(2), call.Int(3)); return 1; }); }
+    std::int32_t QueryBindFloat(NativeCall& call) { return Sql(call, [&] { Input(call).Bind(call.Int(2), static_cast<double>(call.Float(3))); return 1; }); }
+    std::int32_t QueryBindString(NativeCall& call) { return Sql(call, [&] { Input(call).Bind(call.Int(2), call.String(3)); return 1; }); }
+    std::int32_t QueryBindNull(NativeCall& call) { return Sql(call, [&] { Input(call).Bind(call.Int(2), {}); return 1; }); }
+    std::int32_t ExecuteSQLiteAsync(NativeCall& call) {
+        return Sql(call, [&] {
+            const auto filename = Filename(call);
+            const auto input = Input(call, 2);
+            input.Validate();
+            return Submit(call, [filename, input](const auto& canceled) { return source2root::sqlite::Query(filename, input, canceled); });
+        });
+    }
+    std::int32_t ExecuteAsync(NativeCall& call) {
+        return Sql(call, [&] {
+            const auto config = std::filesystem::path(call.ConfigPath()) / "databases.json";
+            const auto shared = std::filesystem::path(call.DataPath(true)) / "sqlite";
+            const auto profile = call.String(1), plugin = call.ScriptId();
+            const auto input = Input(call, 2);
+            input.Validate();
+            return Submit(call, [config, shared, profile, plugin, input](const auto& canceled) {
+                const auto settings = source2root::db::ReadSettings(config, profile, plugin);
+                if (settings.driver == "sqlite") {
+                    std::filesystem::create_directories(shared);
+                    if (std::filesystem::is_symlink(shared)) throw source2root::db::Error("Database directory must not be a symbolic link.");
+                    return source2root::sqlite::Query(shared / (settings.database + ".sqlite"), input, canceled);
+                }
+#if defined(SR_MYSQL_DRIVER)
+                return source2root::mysql::Query(settings, input, canceled);
+#else
+                throw source2root::db::Error("MySQL/MariaDB driver is not installed.");
+#endif
             });
-            if (!request->ticket) return call.Fail("Database queue is full (32 requests).");
-            result->handle = call.Own(RequestType, std::move(request));
-            return result->handle;
         });
     }
     static Result& RequestResult(NativeCall& call) {
@@ -179,7 +240,7 @@ private:
     std::int32_t ResultChanges(NativeCall& call) { return Sql(call, [&] { return Completed(call).changes; }, -1); }
     std::int32_t ResultInsertId(NativeCall& call) {
         call.Output(2, call.Int(3), "");
-        return Sql(call, [&] { call.Output(2, call.Int(3), std::to_string(Completed(call).inserted)); return 1; });
+        return Sql(call, [&] { call.Output(2, call.Int(3), Completed(call).inserted); return 1; });
     }
     std::int32_t Close(NativeCall& call) { call.Close(call.Int(1), ConnectionType); return 1; }
     std::int32_t Prepare(NativeCall& call) {

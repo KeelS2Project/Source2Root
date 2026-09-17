@@ -35,8 +35,8 @@ typedef SQLCallback = function void(SQLRequest request, any data, const char[] e
 
 // Executes one statement on a private worker connection to this script's named
 // SQLite database. This does not join a synchronous SQL_Begin transaction.
-// No parameter placeholders or transaction-control SQL; use SQL_Prepare and
-// bound parameters for dynamic values until async bindings are available.
+// This shorthand has no bound parameters. For dynamic values, create a SQLQuery,
+// bind values and use SQL_ExecuteSQLiteAsync. Transaction-control SQL is rejected.
 // Results: at most 256 rows, 32 columns, 256 KiB text; each value <=4095 bytes.
 // Callback runs once on the server thread (after resume if paused). Empty error
 // means success. Close the request to release results or cancel its callback.
@@ -56,3 +56,20 @@ native bool SQL_ResultFloat(SQLRequest request, int row, int column, float& valu
 native bool SQL_ResultString(SQLRequest request, int row, int column, char[] output, int capacity);
 native int SQL_ResultChanges(SQLRequest request);
 native bool SQL_ResultInsertId(SQLRequest request, char[] output, int capacity);
+
+enum SQLQuery { NoSQLQuery = 0 }
+native SQLQuery SQL_CreateQuery(const char[] query);
+native bool SQL_CloseQuery(SQLQuery query);
+native bool SQL_QueryBindInt(SQLQuery query, int parameter, int value);
+native bool SQL_QueryBindFloat(SQLQuery query, int parameter, float value);
+native bool SQL_QueryBindString(SQLQuery query, int parameter, const char[] value);
+native bool SQL_QueryBindNull(SQLQuery query, int parameter);
+// Submissions copy query text and bindings; the builder can then be changed or
+// closed. Bind every index from 1 through the highest used index (maximum 64).
+native SQLRequest SQL_ExecuteSQLiteAsync(const char[] name, SQLQuery query, SQLCallback callback, any data = 0);
+// Profiles live in configs/extensions/source2root.database/databases.json.
+// Operators explicitly allow plugin IDs per profile. Credentials stay native.
+// Each request opens a private connection. MySQL/MariaDB uses verified TLS for
+// remote TCP, finite connect/read/write timeouts and prepared parameters. Its
+// transaction guarantees depend on table engines and implicit-commit SQL.
+native SQLRequest SQL_ExecuteAsync(const char[] profile, SQLQuery query, SQLCallback callback, any data = 0);

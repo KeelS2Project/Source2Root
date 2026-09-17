@@ -51,6 +51,16 @@ public:
         Check(call_.data_path(call_.context, shared ? KEEL_TRUE : KEEL_FALSE, value.data(), value.size()));
         return value.data();
     }
+    std::string ConfigPath() const {
+        std::array<char, SR_NATIVE_BUFFER_LIMIT> value{};
+        Check(call_.config_path(call_.context, value.data(), value.size()));
+        return value.data();
+    }
+    std::string ScriptId() const {
+        std::array<char, SR_NATIVE_BUFFER_LIMIT> value{};
+        Check(call_.script_id(call_.context, value.data(), value.size()));
+        return value.data();
+    }
     template <typename T>
     std::int32_t Own(std::uint32_t type, std::unique_ptr<T> value) const {
         if (!value) throw std::invalid_argument("Resource is empty.");

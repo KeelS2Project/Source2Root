@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "database_example",
+  "name": "Database example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "database.smx",
+  "source": "database.sp",
+  "enabled": true,
+  "dependencies": []
+}

@@ -35,6 +35,8 @@ typedef struct SrNativeCall {
     /* Capture a required function argument. The token belongs to this script
        generation and provider; it is invalidated before resource cleanup. */
     KeelResult (*capture_callback)(void*, uint32_t index, SrCallback* callback);
+    KeelResult (*config_path)(void*, char* output, uint32_t capacity);
+    KeelResult (*script_id)(void*, char* output, uint32_t capacity);
 } SrNativeCall;
 
 typedef KeelResult (*SrContextNativeFunction)(void* user_data, const SrNativeCall* call,

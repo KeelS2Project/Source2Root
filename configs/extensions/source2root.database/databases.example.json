@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "connections": {
+    "local": {
+      "driver": "sqlite",
+      "database": "shared",
+      "allow_plugins": ["database_example"]
+    },
+    "network": {
+      "driver": "mysql",
+      "host": "database.example.com",
+      "port": 3306,
+      "database": "source2root",
+      "user": "source2root",
+      "password": "replace-me",
+      "tls": true,
+      "ca": "/etc/ssl/certs/database-ca.pem",
+      "timeout": 3,
+      "allow_plugins": ["database_example"]
+    }
+  }
+}

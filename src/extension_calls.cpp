@@ -136,6 +136,14 @@ struct Foundation::NativeInvocation {
                     } catch (...) { call.script.callbacks.erase(id); throw; }
                     *token = id;
                 });
+            },
+            [](void* raw, char* output, std::uint32_t capacity) {
+                return Guard(raw, [&](auto& call) {
+                    Copy((call.foundation.root_ / "configs/extensions" / call.provider.service).string(), output, capacity);
+                });
+            },
+            [](void* raw, char* output, std::uint32_t capacity) {
+                return Guard(raw, [&](auto& call) { Copy(call.script.manifest.id, output, capacity); });
             }};
     }
 };

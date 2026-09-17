@@ -3,6 +3,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
 #include <keels2/bootstrap_api.h>
 #include <filesystem>
 #include <fstream>
@@ -101,6 +102,16 @@ int main(int argc, char** argv) {
         Copy(argv[8], script / "plugins/hello/plugin.json");
         std::filesystem::remove(script / "logs/source2root.log");
         std::filesystem::create_directories(script / "configs");
+        if (argc == 12 && std::string(argv[10]) == "database_configured") {
+            const auto file = script / "configs/extensions/source2root.database/databases.json";
+            if (const auto* config = std::getenv("SR_DATABASE_TEST_CONFIG"); config && *config) {
+                Copy(config, file);
+                std::filesystem::permissions(file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+            } else {
+                std::filesystem::create_directories(file.parent_path());
+                std::ofstream(file) << R"({"schema":1,"connections":{"acceptance":{"driver":"sqlite","database":"shared","allow_plugins":["hello"]}}})";
+            }
+        }
         std::ofstream(script / "configs/admin_groups.cfg") << R"("Groups" { "fixture" { "immunity" "10" "permissions" { "demo.hello" "1" "demo.status" "1" "admin.kick" "1" "admin.changemap" "1" "admin.restart" "1" } } })";
         const std::string permissions = R"("Admins" { "Fixture" { "identity" "STEAM_0:1:61" "group" "fixture" } })";
         std::ofstream(script / "configs/admins.cfg") << permissions;
@@ -169,7 +180,7 @@ int main(int argc, char** argv) {
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
             return 0;
         }
-        if (argc == 12 && std::string(argv[10]) == "database_async") {
+        if (argc == 12 && (std::string(argv[10]) == "database_async" || std::string(argv[10]) == "database_configured")) {
             auto occurrences = [&](const char* text) {
                 const std::string log = messages();
                 std::size_t offset = 0;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../database/types.h"
+
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -12,10 +14,7 @@ struct sqlite3_stmt;
 
 namespace source2root::sqlite {
 
-class Error : public std::runtime_error {
-public:
-    using std::runtime_error::runtime_error;
-};
+using Error = db::Error;
 
 class Database {
 public:

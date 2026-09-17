@@ -20,3 +20,7 @@ acquired at revisions in `dependencies.lock.json` and retain their own notices.
 
 * SQLite 3.53.4: public domain. The pinned amalgamation retains its original
   notices. See https://www.sqlite.org/copyright.html.
+* MariaDB Connector/C 3.4.9: LGPL-2.1-or-later, with additional per-file notices
+  for its bundled components. It is built as a separate shared library. Preserve
+  COPYING.LIB, source notices and corresponding buildable source when distributing
+  it. TLS uses the platform TLS library (OpenSSL on Linux, Schannel on Windows).
