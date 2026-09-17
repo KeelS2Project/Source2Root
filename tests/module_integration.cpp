@@ -105,6 +105,13 @@ int main(int argc, char** argv) {
         Copy(argv[8], script / "plugins/hello/plugin.json");
         std::filesystem::remove(script / "logs/source2root.log");
         std::filesystem::create_directories(script / "configs");
+        if (argc == 12 && std::string(argv[10]) == "geoip") {
+            const auto* data = std::getenv("SR_GEOIP_TEST_DATA");
+            Check(data && *data, "GeoIP fixture needs upstream sample database");
+            const auto root = script / "data/extensions/source2root.geoip";
+            std::filesystem::remove_all(root);
+            Copy(std::filesystem::path(data) / "GeoIP2-City-Test.mmdb", root / "city.mmdb");
+        }
         if (argc == 12 && std::string(argv[10]) == "clientprefs_mysql") {
             const auto* config = std::getenv("SR_DATABASE_TEST_CONFIG");
             Check(config && *config, "shared preferences fixture requires private configuration");
@@ -194,6 +201,39 @@ int main(int argc, char** argv) {
                   "stock baseline must refuse platform before initialization");
             Check(stop(), "stock host stops after rejected module");
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
+            return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "geoip") {
+            auto await = [&](auto ready) {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                while (!ready()) {
+                    Check(std::chrono::steady_clock::now() < deadline, "GeoIP module deadline");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            };
+            run("sr plugins pause hello");
+            for (int i = 0; i < 10; ++i) { frame(); std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
+            Check(!contains("GEO_SCRIPT_OK"), "paused script retains async GeoIP completion");
+            run("sr plugins resume hello");
+            await([&] { frame(); return contains("GEO_SCRIPT_OK") && contains("GEO_MISSING_OK"); });
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked"), "GeoIP provider remains leased by database/record resources");
+            const auto root = script / "data/extensions/source2root.geoip";
+            std::ofstream(root / "city.mmdb", std::ios::trunc) << "malformed replacement";
+            run("sr_geo_reload 0");
+            await([&] { frame(); return contains("GEO_RELOAD_ERROR_OK"); });
+            Copy(std::filesystem::path(std::getenv("SR_GEOIP_TEST_DATA")) / "GeoIP2-Country-Test.mmdb", root / "city.mmdb");
+            run("sr_geo_reload 1");
+            await([&] { frame(); return contains("GEO_RELOAD_CHAIN_OK"); });
+            run("sr_geo_wrong");
+            Check(contains("Foreign extension or wrong resource type."), "wrong GeoIP handle type raises a native error");
+            run("sr_geo_pending"); run("sr_geo_close");
+            run("sr plugins unload hello");
+            await([&] { frame(); return stop(); });
+            Check(!contains("GEO_FAILED") && !contains("GEO_UNEXPECTED"), "GeoIP ownership, snapshot replacement and cancellation");
+            Check(std::filesystem::is_empty(root / ".snapshots"), "canceled and live snapshots released before extension unload");
+            Check(network_stop(), "GeoIP fixture teardown");
+            std::cout << messages() << "GeoIP module lifecycle passed\n";
             return 0;
         }
 #if defined(SR_PREFS_TEST)

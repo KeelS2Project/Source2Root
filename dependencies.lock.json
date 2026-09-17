@@ -56,5 +56,11 @@
     "revision": "64e9fe09fea6a017bab92e19a08d2301e3da5b56",
     "url": "https://codeload.github.com/mariadb-corporation/mariadb-connector-c/tar.gz/64e9fe09fea6a017bab92e19a08d2301e3da5b56",
     "sha256": "3b442e60aeb707dd1db192de2fa0f7d2f1940ebe40a7d772aeb2a0647c5b8ebb"
+  },
+  "libmaxminddb": {
+    "version": "1.14.0",
+    "repository": "https://github.com/maxmind/libmaxminddb",
+    "url": "https://github.com/maxmind/libmaxminddb/releases/download/1.14.0/libmaxminddb-1.14.0.tar.gz",
+    "sha256": "65ff92382c71ef6634b8c13e278651a2efa68f1de28ef3c31fc32369fa0bb3e3"
   }
 }

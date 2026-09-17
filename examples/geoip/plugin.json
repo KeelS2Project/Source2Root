@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "geoip_example",
+  "name": "Geographic Lookup Example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "geoip.smx",
+  "source": "geoip.sp",
+  "enabled": true,
+  "dependencies": []
+}
