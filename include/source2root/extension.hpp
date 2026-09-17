@@ -45,7 +45,8 @@ public:
                 native_queried_ = true;
                 native_api_ = static_cast<const SrNativeApi*>(raw);
                 if (!native_api_ || native_api_->size != sizeof(*native_api_) || native_api_->api_version != SR_NATIVE_API_VERSION ||
-                    !native_api_->register_native || !native_api_->unregister_native)
+                    !native_api_->register_native || !native_api_->unregister_native ||
+                    !native_api_->deliver_callback || !native_api_->cancel_callback)
                     return SetupFailed("Source2Root native call service is incompatible.");
             }
             if (services_.Publish(service_.c_str(), version_, &marker_, publication_) != KEEL_RESULT_OK)
@@ -79,6 +80,17 @@ protected:
         : service_(provider_service ? provider_service : ""), version_(version) {}
     virtual bool OnExtensionStart() = 0;
     virtual bool PrepareExtensionUnload() { return true; }
+
+    KeelResult DeliverCallback(SrCallback callback, const std::vector<std::int32_t>& cells = {},
+        const char* text = nullptr) {
+        if (!native_api_) return KEEL_RESULT_NOT_READY;
+        return native_api_->deliver_callback(native_api_->context, HostContext().PluginHandle(), callback,
+            cells.data(), static_cast<std::uint32_t>(cells.size()), text);
+    }
+    KeelResult CancelCallback(SrCallback callback) {
+        if (!native_api_) return KEEL_RESULT_NOT_READY;
+        return native_api_->cancel_callback(native_api_->context, HostContext().PluginHandle(), callback);
+    }
 
     template <typename Owner, typename... Arguments>
     bool RegisterNative(const char* name, std::int32_t (Owner::*callback)(Arguments...)) {

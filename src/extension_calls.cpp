@@ -121,6 +121,21 @@ struct Foundation::NativeInvocation {
                     if (!message) throw NativeError("Missing error message.");
                     call.script.error = std::string(message).substr(0, SR_NATIVE_BUFFER_LIMIT - 1);
                 });
+            },
+            [](void* raw, std::uint32_t index, SrCallback* token) {
+                if (token) *token = 0;
+                return Guard(raw, [&](auto& call) {
+                    if (!token) throw NativeError("Missing callback output.");
+                    auto* function = call.arguments.Callback(index);
+                    call.foundation.Limit(call.script);
+                    if (!call.foundation.next_callback_) throw NativeError("Callback token space exhausted.");
+                    const auto id = call.foundation.next_callback_++;
+                    call.script.callbacks.insert(id);
+                    try {
+                        call.foundation.callbacks_.emplace(id, ExtensionCallback{&call.script, call.provider.owner, function});
+                    } catch (...) { call.script.callbacks.erase(id); throw; }
+                    *token = id;
+                });
             }};
     }
 };
@@ -162,6 +177,43 @@ KeelResult Foundation::RegisterContextNative(KeelPluginHandle owner, const SrCon
     const auto result = RegisterNative(owner, legacy, registration);
     if (result == KEEL_RESULT_OK) providers_.at(registration).context_invoke = spec.invoke;
     return result;
+}
+
+KeelResult Foundation::CancelCallback(KeelPluginHandle owner, SrCallback token) {
+    Thread();
+    if (!owner || !token) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto found = callbacks_.find(token);
+    if (found == callbacks_.end()) return KEEL_RESULT_NOT_FOUND;
+    if (found->second.provider != owner) return KEEL_RESULT_INVALID_ARGUMENT;
+    found->second.script->callbacks.erase(token);
+    callbacks_.erase(found);
+    return KEEL_RESULT_OK;
+}
+
+KeelResult Foundation::DeliverCallback(KeelPluginHandle owner, SrCallback token,
+    const Cell* cells, std::uint32_t count, const char* text) {
+    Thread();
+    if (!owner || !token || count > 16 || (count && !cells) || (text && count == 16))
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    if (text) {
+        std::size_t length = 0;
+        while (length < SR_NATIVE_BUFFER_LIMIT && text[length]) ++length;
+        if (length == SR_NATIVE_BUFFER_LIMIT) return KEEL_RESULT_INVALID_ARGUMENT;
+    }
+    const auto found = callbacks_.find(token);
+    if (found == callbacks_.end()) return KEEL_RESULT_NOT_FOUND;
+    const auto callback = found->second;
+    if (callback.provider != owner) return KEEL_RESULT_INVALID_ARGUMENT;
+    auto& script = *callback.script;
+    if (script.state != PluginState::Running && script.state != PluginState::Loading && script.state != PluginState::Paused) {
+        CancelCallback(owner, token);
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    if (managing_ || !runtime_.Idle() || script.state != PluginState::Running) return KEEL_RESULT_BUSY;
+    std::vector<Cell> arguments;
+    if (count) arguments.assign(cells, cells + count);
+    CancelCallback(owner, token);
+    return Invoke(script, callback.function, arguments, text) ? KEEL_RESULT_OK : KEEL_RESULT_ENGINE_FAILURE;
 }
 
 }

@@ -1,5 +1,7 @@
 #include "database.h"
+#include "query.h"
 #include <source2root/extension.hpp>
+#include <source2root/work_queue.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -18,8 +20,34 @@ public:
     static constexpr PluginInfo Info{"Source2Root Database", "KeelS2 Project", "1.0.0", "Database access for script plugins"};
     static constexpr PluginRequirement Requirements[]{{"Source2Root", "1.0.0", DependencyRequirement::exact}};
     DatabaseExtension() : Extension("source2root.database") {}
+    void OnGameFrame(bool, bool, bool) override { if (queue_) queue_->Dispatch(); }
 private:
-    static constexpr std::uint32_t ConnectionType = 1, StatementType = 2;
+    static constexpr std::uint32_t ConnectionType = 1, StatementType = 2, RequestType = 3;
+    struct Result {
+        source2root::sqlite::QueryResult query;
+        std::string error;
+        std::int32_t handle = 0;
+        bool ready = false;
+    };
+    struct Request {
+        DatabaseExtension* extension;
+        SrCallback callback;
+        std::shared_ptr<Result> result;
+        std::unique_ptr<source2root::WorkQueue::Ticket> ticket;
+        ~Request() {
+            ticket.reset();
+            extension->CancelCallback(callback);
+        }
+    };
+    std::unique_ptr<source2root::WorkQueue> queue_;
+    bool PrepareExtensionUnload() override {
+        if (queue_) {
+            queue_->Dispatch();
+            if (queue_->Pending()) return false;
+            queue_.reset();
+        }
+        return true;
+    }
     bool OnExtensionStart() override {
         return RegisterNative("SQL_OpenSQLite", 1, &DatabaseExtension::Open)
             && RegisterNative("SQL_Close", 1, &DatabaseExtension::Close)
@@ -40,7 +68,18 @@ private:
             && RegisterNative("SQL_Commit", 1, &DatabaseExtension::Commit)
             && RegisterNative("SQL_Rollback", 1, &DatabaseExtension::Rollback)
             && RegisterNative("SQL_AffectedRows", 1, &DatabaseExtension::AffectedRows)
-            && RegisterNative("SQL_InsertId", 3, &DatabaseExtension::InsertId);
+            && RegisterNative("SQL_InsertId", 3, &DatabaseExtension::InsertId)
+            && RegisterNative("SQL_QuerySQLiteAsync", 4, &DatabaseExtension::QueryAsync)
+            && RegisterNative("SQL_CloseRequest", 1, &DatabaseExtension::CloseRequest)
+            && RegisterNative("SQL_RequestReady", 1, &DatabaseExtension::RequestReady)
+            && RegisterNative("SQL_ResultRows", 1, &DatabaseExtension::ResultRows)
+            && RegisterNative("SQL_ResultColumns", 1, &DatabaseExtension::ResultColumns)
+            && RegisterNative("SQL_ResultIsNull", 3, &DatabaseExtension::ResultIsNull)
+            && RegisterNative("SQL_ResultInt", 4, &DatabaseExtension::ResultInt)
+            && RegisterNative("SQL_ResultFloat", 4, &DatabaseExtension::ResultFloat)
+            && RegisterNative("SQL_ResultString", 5, &DatabaseExtension::ResultString)
+            && RegisterNative("SQL_ResultChanges", 1, &DatabaseExtension::ResultChanges)
+            && RegisterNative("SQL_ResultInsertId", 3, &DatabaseExtension::ResultInsertId);
     }
     template <typename Function>
     static std::int32_t Sql(NativeCall& call, Function function, std::int32_t failure = 0) {
@@ -50,17 +89,97 @@ private:
     }
     static Connection& Db(NativeCall& call) { return call.Resource<Connection>(call.Int(1), ConnectionType); }
     static Statement& Stmt(NativeCall& call) { return call.Resource<Statement>(call.Int(1), StatementType); }
+    static std::filesystem::path Filename(NativeCall& call) {
+        const auto name = call.String(1);
+        if (name.empty() || name.size() > 64 || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        })) throw source2root::sqlite::Error("Database name must use 1..64 letters, digits, underscores or hyphens.");
+        const auto directory = std::filesystem::path(call.DataPath()) / "sqlite";
+        std::filesystem::create_directories(directory);
+        if (std::filesystem::is_symlink(directory)) throw source2root::sqlite::Error("Database directory must not be a symbolic link.");
+        return directory / (name + ".sqlite");
+    }
     std::int32_t Open(NativeCall& call) {
         return Sql(call, [&] {
-            const auto name = call.String(1);
-            if (name.empty() || name.size() > 64 || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
-                return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
-            })) return call.Fail("Database name must use 1..64 letters, digits, underscores or hyphens.");
-            const auto directory = std::filesystem::path(call.DataPath()) / "sqlite";
-            std::filesystem::create_directories(directory);
-            if (std::filesystem::is_symlink(directory)) return call.Fail("Database directory must not be a symbolic link.");
-            return call.Own(ConnectionType, std::make_unique<Connection>(std::make_shared<Database>(directory / (name + ".sqlite"))));
+            return call.Own(ConnectionType, std::make_unique<Connection>(std::make_shared<Database>(Filename(call))));
         });
+    }
+    std::int32_t QueryAsync(NativeCall& call) {
+        return Sql(call, [&] {
+            const auto filename = Filename(call);
+            const auto sql = call.String(2);
+            const auto data = call.Int(4);
+            // Start workers only after this module has successfully loaded.
+            if (!queue_) queue_ = std::make_unique<source2root::WorkQueue>(1, 32);
+            auto result = std::make_shared<Result>();
+            auto request = std::make_unique<Request>();
+            request->extension = this;
+            request->callback = call.Callback(3);
+            request->result = result;
+            const auto callback = request->callback;
+            request->ticket = queue_->Submit([result, filename, sql](const auto& canceled) {
+                result->query = source2root::sqlite::Query(filename, sql, canceled);
+            }, [this, result, callback, data](std::exception_ptr error) {
+                if (!result->ready) {
+                    if (error) {
+                        try { std::rethrow_exception(error); }
+                        catch (const std::exception& failure) { result->error = std::string(failure.what()).substr(0, 4095); }
+                        catch (...) { result->error = "Database worker failed."; }
+                    }
+                    result->ready = true;
+                }
+                return DeliverCallback(callback, {result->handle, data}, result->error.c_str()) != KEEL_RESULT_BUSY;
+            });
+            if (!request->ticket) return call.Fail("Database queue is full (32 requests).");
+            result->handle = call.Own(RequestType, std::move(request));
+            return result->handle;
+        });
+    }
+    static Result& RequestResult(NativeCall& call) {
+        return *call.Resource<Request>(call.Int(1), RequestType).result;
+    }
+    static source2root::sqlite::QueryResult& Completed(NativeCall& call) {
+        auto& result = RequestResult(call);
+        if (!result.ready) throw source2root::sqlite::Error("Database request is not complete.");
+        if (!result.error.empty()) throw source2root::sqlite::Error(result.error);
+        return result.query;
+    }
+    static const source2root::sqlite::QueryValue& Value(NativeCall& call) {
+        auto& result = Completed(call);
+        const auto row = call.Int(2), column = call.Int(3);
+        if (row < 0 || static_cast<std::size_t>(row) >= result.rows.size() || column < 0 || column >= result.columns)
+            throw source2root::sqlite::Error("Database result row or column is out of bounds.");
+        return result.rows[row][column];
+    }
+    std::int32_t CloseRequest(NativeCall& call) { call.Close(call.Int(1), RequestType); return 1; }
+    std::int32_t RequestReady(NativeCall& call) { return RequestResult(call).ready ? 1 : 0; }
+    std::int32_t ResultRows(NativeCall& call) { return Sql(call, [&] { return static_cast<int>(Completed(call).rows.size()); }, -1); }
+    std::int32_t ResultColumns(NativeCall& call) { return Sql(call, [&] { return Completed(call).columns; }, -1); }
+    std::int32_t ResultIsNull(NativeCall& call) { return Sql(call, [&] { return Value(call).null ? 1 : 0; }, -1); }
+    std::int32_t ResultInt(NativeCall& call) {
+        call.OutputCell(4, 0);
+        return Sql(call, [&] {
+            const auto& value = Value(call);
+            if (!value.integer) throw source2root::sqlite::Error("Value is null or exceeds SourcePawn cell range.");
+            call.OutputCell(4, *value.integer); return 1;
+        });
+    }
+    std::int32_t ResultFloat(NativeCall& call) {
+        call.OutputCell(4, 0);
+        return Sql(call, [&] {
+            const auto& value = Value(call);
+            if (!value.number) throw source2root::sqlite::Error("Value is null or exceeds finite SourcePawn float range.");
+            call.OutputCell(4, std::bit_cast<std::int32_t>(*value.number)); return 1;
+        });
+    }
+    std::int32_t ResultString(NativeCall& call) {
+        call.Output(4, call.Int(5), "");
+        return Sql(call, [&] { call.Output(4, call.Int(5), Value(call).text); return 1; });
+    }
+    std::int32_t ResultChanges(NativeCall& call) { return Sql(call, [&] { return Completed(call).changes; }, -1); }
+    std::int32_t ResultInsertId(NativeCall& call) {
+        call.Output(2, call.Int(3), "");
+        return Sql(call, [&] { call.Output(2, call.Int(3), std::to_string(Completed(call).inserted)); return 1; });
     }
     std::int32_t Close(NativeCall& call) { call.Close(call.Int(1), ConnectionType); return 1; }
     std::int32_t Prepare(NativeCall& call) {

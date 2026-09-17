@@ -109,6 +109,9 @@ public:
     KeelResult RegisterNative(KeelPluginHandle owner, const SrNativeSpec& spec, SrRegistration& registration);
     KeelResult RegisterContextNative(KeelPluginHandle owner, const SrContextNativeSpec& spec, SrRegistration& registration);
     KeelResult UnregisterNative(KeelPluginHandle owner, SrRegistration registration);
+    KeelResult DeliverCallback(KeelPluginHandle owner, SrCallback callback,
+        const Cell* cells, std::uint32_t count, const char* text);
+    KeelResult CancelCallback(KeelPluginHandle owner, SrCallback callback);
     KeelResult OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerConnection& player,
         const SrMenuSpec& spec, SrMenuSession& session);
     KeelResult CloseNativeMenu(KeelPluginHandle owner, SrMenuSession session);
@@ -138,6 +141,7 @@ private:
         std::map<std::string, Cell> convars;
         std::map<std::string, SourcePawn::IPluginFunction*> events;
         std::set<SrRegistration> providers;
+        std::set<SrCallback> callbacks;
         std::unique_ptr<SourcePawn::IPluginRuntime> vm;
     };
     struct Slot {
@@ -185,6 +189,13 @@ private:
         SrContextNativeFunction context_invoke = nullptr;
     };
     struct NativeInvocation;
+    struct ExtensionCallback {
+        Script* script;
+        KeelPluginHandle provider;
+        SourcePawn::IPluginFunction* function;
+    };
+    std::map<SrCallback, ExtensionCallback> callbacks_;
+    SrCallback next_callback_ = 1;
     Cell InvokeContextNative(Script& script, Provider& provider, const Arguments& args);
     struct NativeDisplay {
         std::uint64_t session;

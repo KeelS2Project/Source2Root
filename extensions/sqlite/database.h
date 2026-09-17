@@ -27,9 +27,11 @@ public:
     bool InTransaction() const;
     std::int64_t InsertId() const;
     int Changes() const;
+    void AllowTransactions(bool allow) { allow_transactions_ = allow; }
 private:
     friend class Statement;
     sqlite3* database_ = nullptr;
+    bool allow_transactions_ = true;
     std::chrono::steady_clock::time_point deadline_;
     void Budget();
     void Check(int result) const;
@@ -48,6 +50,7 @@ public:
     bool Step();
     void Reset();
     int Columns() const;
+    int Parameters() const;
     bool IsNull(int column) const;
     std::int32_t Int(int column) const;
     double Float(int column) const;

@@ -428,6 +428,8 @@ bool Foundation::Cleanup(Script& script) {
         script.stop_notified = true;
         if (auto* stop = script.vm->GetFunctionByName("OnPluginStop")) Invoke(script, stop);
     }
+    for (const auto callback : script.callbacks) callbacks_.erase(callback);
+    script.callbacks.clear();
     CloseOwnedMenus(script);
     for (const auto& [slot, display] : displays_)
         if (display.script == &script) return Fail(script.manifest.id + ": menu clear pending; retained for retry");
@@ -825,7 +827,7 @@ bool Foundation::DiscoverScripts(bool refresh) {
 void Foundation::Limit(Script& script) {
     if (script.state != PluginState::Loading && script.state != PluginState::Running)
         throw NativeError("plugin is retiring; new resources are refused");
-    if (handles_.Owned(script.owner).size() + script.commands.size() + script.events.size() >= 128)
+    if (handles_.Owned(script.owner).size() + script.commands.size() + script.events.size() + script.callbacks.size() >= 128)
         throw NativeError("plugin resource limit (128) reached");
 }
 

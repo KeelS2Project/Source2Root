@@ -12,6 +12,7 @@ extern "C" {
 #define SR_NATIVE_BUFFER_LIMIT 4096u
 
 typedef void (*SrResourceDestroy)(void* value);
+typedef uint64_t SrCallback;
 
 typedef struct SrNativeCall {
     uint32_t size;
@@ -31,6 +32,9 @@ typedef struct SrNativeCall {
     KeelResult (*get_resource)(void*, int32_t handle, uint32_t type, void** value);
     KeelResult (*close_resource)(void*, int32_t handle, uint32_t type);
     KeelResult (*set_error)(void*, const char* message);
+    /* Capture a required function argument. The token belongs to this script
+       generation and provider; it is invalidated before resource cleanup. */
+    KeelResult (*capture_callback)(void*, uint32_t index, SrCallback* callback);
 } SrNativeCall;
 
 typedef KeelResult (*SrContextNativeFunction)(void* user_data, const SrNativeCall* call,
@@ -54,6 +58,13 @@ typedef struct SrNativeApi {
     void* context;
     KeelResult (*register_native)(void*, KeelPluginHandle owner, const SrContextNativeSpec*, SrRegistration*);
     KeelResult (*unregister_native)(void*, KeelPluginHandle owner, SrRegistration);
+    /* Server thread only. Cells are followed by text, if non-NULL. At most 16
+       total arguments and 4095 text bytes. OK/ENGINE_FAILURE consume the token;
+       BUSY retains it during pause, loading or reentrant script execution.
+       NOT_FOUND means it was canceled, consumed or its script retired. */
+    KeelResult (*deliver_callback)(void*, KeelPluginHandle owner, SrCallback,
+        const int32_t* cells, uint32_t count, const char* text);
+    KeelResult (*cancel_callback)(void*, KeelPluginHandle owner, SrCallback);
 } SrNativeApi;
 
 #ifdef __cplusplus

@@ -25,12 +25,14 @@ Database::Database(const std::filesystem::path& filename) {
     sqlite3_limit(database_, SQLITE_LIMIT_COLUMN, 128);
     sqlite3_db_config(database_, SQLITE_DBCONFIG_DEFENSIVE, 1, nullptr);
     sqlite3_db_config(database_, SQLITE_DBCONFIG_TRUSTED_SCHEMA, 0, nullptr);
-    sqlite3_set_authorizer(database_, [](void*, int action, const char* first, const char*, const char*, const char*) {
+    sqlite3_set_authorizer(database_, [](void* raw, int action, const char* first, const char*, const char*, const char*) {
+        if ((action == SQLITE_TRANSACTION || action == SQLITE_SAVEPOINT) && !static_cast<Database*>(raw)->allow_transactions_)
+            return SQLITE_DENY;
         if (action == SQLITE_ATTACH || action == SQLITE_DETACH) return SQLITE_DENY;
         if (action == SQLITE_PRAGMA && (!first || (std::strcmp(first, "table_info") && std::strcmp(first, "index_list") &&
             std::strcmp(first, "foreign_key_list")))) return SQLITE_DENY;
         return SQLITE_OK;
-    }, nullptr);
+    }, this);
     sqlite3_progress_handler(database_, 1000, [](void* raw) {
         return std::chrono::steady_clock::now() > static_cast<Database*>(raw)->deadline_ ? 1 : 0;
     }, this);
@@ -107,6 +109,7 @@ void Statement::Reset() {
     row_ = done_ = started_ = false;
 }
 int Statement::Columns() const { return sqlite3_column_count(statement_); }
+int Statement::Parameters() const { return sqlite3_bind_parameter_count(statement_); }
 void Statement::Column(int index) const { if (!row_ || index < 0 || index >= Columns()) throw Error("No current row or invalid column."); }
 bool Statement::IsNull(int column) const { Column(column); return sqlite3_column_type(statement_, column) == SQLITE_NULL; }
 std::int32_t Statement::Int(int column) const {

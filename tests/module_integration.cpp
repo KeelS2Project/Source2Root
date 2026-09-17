@@ -1,6 +1,8 @@
 #include <keels2/player_actions.h>
 #include <keels2/player_input.h>
 #include <cmath>
+#include <chrono>
+#include <cstring>
 #include <keels2/bootstrap_api.h>
 #include <filesystem>
 #include <fstream>
@@ -165,6 +167,42 @@ int main(int argc, char** argv) {
                   "stock baseline must refuse platform before initialization");
             Check(stop(), "stock host stops after rejected module");
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
+            return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "database_async") {
+            auto occurrences = [&](const char* text) {
+                const std::string log = messages();
+                std::size_t offset = 0;
+                unsigned found = 0;
+                while ((offset = log.find(text, offset)) != std::string::npos) { ++found; offset += std::strlen(text); }
+                return found;
+            };
+            auto await = [&](auto ready) {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+                while (!ready()) {
+                    Check(std::chrono::steady_clock::now() < deadline, "async module deadline");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            };
+            run("sr plugins pause hello");
+            for (int i = 0; i < 10; ++i) { frame(); std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
+            Check(!contains("SQL_ASYNC_OK") && !contains("SQL_ASYNC_ERROR_OK"), "paused VM cannot receive completed database work");
+            run("sr plugins resume hello");
+            await([&] { frame(); return occurrences("SQL_ASYNC_OK") == 1 && occurrences("SQL_ASYNC_ERROR_OK") == 1; });
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked"), "provider remains usable after unload refusal");
+            run("sr_async");
+            run("sr plugins reload hello");
+            await([&] { frame(); return occurrences("SQL_ASYNC_OK") == 2 && occurrences("SQL_ASYNC_ERROR_OK") == 2; });
+            Check(!contains("SQL_ASYNC_FAILED") && !contains("SQL_ASYNC_UNEXPECTED"),
+                "typed results, recoverable SQL error, cancellation and generation isolation");
+            run("sr_async_slow");
+            run("sr plugins unload hello");
+            // Global stop is retryable while canceled workers leave their images.
+            await([&] { return stop(); });
+            Check(!contains("SQL_ASYNC_UNEXPECTED"), "unload suppresses in-flight completion");
+            Check(network_stop(), "async database fixture teardown");
+            std::cout << messages() << "Async database module lifecycle passed\n";
             return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "database") {

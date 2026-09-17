@@ -15,6 +15,11 @@ class NativeCall {
 public:
     explicit NativeCall(const SrNativeCall& call) : call_(call) {}
     std::uint64_t Owner() const { return call_.script_owner; }
+    SrCallback Callback(unsigned index) const {
+        SrCallback token = 0;
+        Check(call_.capture_callback(call_.context, index, &token));
+        return token;
+    }
     std::int32_t Int(unsigned index) const {
         std::int32_t value = 0;
         Check(call_.read_cell(call_.context, index, &value));
