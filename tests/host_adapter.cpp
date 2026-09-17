@@ -66,6 +66,9 @@ public:
     unsigned management_caps = 7, management_count = 0;
     KeelResult management_cap_status = KEEL_RESULT_OK, management_status = KEEL_RESULT_OK;
     KeelPlayerManagementAction last_management{};
+    unsigned round_caps = 1, round_count = 0;
+    KeelResult round_cap_status = KEEL_RESULT_OK, round_status = KEEL_RESULT_OK;
+    KeelRoundTermination last_round{};
     unsigned entity_write_caps = 1, entity_write_count = 0;
     KeelResult entity_write_status = KEEL_RESULT_OK;
     bool entity_write_callback = false;
@@ -559,4 +562,34 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureRestartVariable(unsigned typ
     if (type == KEELS2_CONVAR_STRING) spec.default_value.value.string_value = "0";
     GameConVarHandle id = 0; std::string error;
     if (active->CreateConVar(spec, nullptr, nullptr, nullptr, id, nullptr, error) != KEEL_RESULT_OK) std::abort();
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryRoundControl(
+    unsigned version, keels2::host::GameAdapterRoundControlApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterRoundControlVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* base, unsigned* out) noexcept {
+        if (!base || !out) return KEEL_RESULT_INVALID_ARGUMENT;
+        auto& adapter = *static_cast<Adapter*>(base); *out = adapter.round_caps; return adapter.round_cap_status;
+    };
+    api->terminate = [](keels2::host::GameAdapter* base, const KeelRoundTermination* request) noexcept {
+        if (!base || !request || request->size != sizeof(*request) || request->reserved) return KEEL_RESULT_INVALID_ARGUMENT;
+        auto& adapter = *static_cast<Adapter*>(base);
+        if (adapter.round_status != KEEL_RESULT_OK) return adapter.round_status;
+        if (!(adapter.round_caps & 1)) return KEEL_RESULT_UNSUPPORTED;
+        adapter.last_round = *request; ++adapter.round_count; return KEEL_RESULT_OK;
+    };
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureRoundCount(KeelRoundTermination* last) {
+    if (!active) return 0;
+    if (last) *last = active->last_round;
+    return active->round_count;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureRoundState(unsigned caps, unsigned capability_result, unsigned result) {
+    if (!active) return;
+    active->round_caps = caps; active->round_cap_status = static_cast<KeelResult>(capability_result);
+    active->round_status = static_cast<KeelResult>(result);
 }

@@ -1,3 +1,4 @@
+#include <keels2/round_control.h>
 #include <keels2/player_management.h>
 #include <keels2/player_actions.h>
 #include <keels2/player_input.h>
@@ -266,6 +267,20 @@ int main(int argc, char** argv) {
             const auto action_state = adapter.Get<void (*)(unsigned,unsigned,unsigned)>("SrFixtureManagementState");
             const auto write_count = adapter.Get<unsigned (*)()>("SrFixtureWriteCount");
             const auto write_state = adapter.Get<void (*)(unsigned,unsigned,bool)>("SrFixtureWriteState");
+            const auto round_count = adapter.Get<unsigned (*)(KeelRoundTermination*)>("SrFixtureRoundCount");
+            const auto round_state = adapter.Get<void (*)(unsigned,unsigned,unsigned)>("SrFixtureRoundState");
+            Check(round_count(nullptr) == 0,"initialization does not terminate rounds");
+            run("sr_cs_round");
+            KeelRoundTermination last_round{};
+            Check(occurrences("CSTRIKE_ROUND_OK") == 1 && round_count(&last_round) == 3 && last_round.reason == 9 &&
+                last_round.delay == 3600 && last_round.team == 2 && !last_round.reserved,"compiled script round parameter mapping");
+            round_state(0,KEEL_RESULT_OK,KEEL_RESULT_OK); run("sr_cs_round_unavailable");
+            Check(contains("CSTRIKE_ROUND_UNAVAILABLE_OK") && round_count(nullptr) == 3,"unsupported round cannot dispatch");
+            round_state(1,KEEL_RESULT_UNSUPPORTED,KEEL_RESULT_OK); run("sr_cs_round_caps_error");
+            Check(contains("CSTRIKE_ROUND_CAPS_ERROR_OK") && round_count(nullptr) == 3,"round capability error clears output");
+            round_state(1,KEEL_RESULT_OK,KEEL_RESULT_NOT_READY); run("sr_cs_round_error");
+            Check(contains("CSTRIKE_ROUND_ERROR_OK") && round_count(nullptr) == 3,"round engine error propagated");
+            round_state(1,KEEL_RESULT_OK,KEEL_RESULT_OK);
             Check(occurrences("CSTRIKE_SCRIPT_OK") == 1 && action_count(nullptr) == 0, "Counter-Strike initialization has no player actions");
             Check(write_count() == 0, "Counter-Strike initialization has no statistic writes");
             run("sr_cs_stats");
@@ -281,6 +296,7 @@ int main(int argc, char** argv) {
                 last.kind == KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM && last.team == 3, "three script actions reach the owned controller");
             run("sr_cs_invalid");
             Check(contains("CSTRIKE_INVALID_OK") && action_count(nullptr) == 3 && write_count() == 4, "invalid team/player/statistic cannot dispatch");
+            Check(round_count(nullptr) == 3,"invalid round cannot dispatch");
             action_state(0,KEEL_RESULT_OK,KEEL_RESULT_OK);
             run("sr_cs_unavailable");
             Check(contains("CSTRIKE_UNAVAILABLE_OK") && action_count(nullptr) == 3, "unsupported actions cannot dispatch");
@@ -294,15 +310,20 @@ int main(int argc, char** argv) {
             reconnect(); run("sr_cs_reconnected");
             Check(contains("CSTRIKE_RECONNECTED_OK") && action_count(nullptr) == 3 && write_count() == 4, "saved player cannot target replacement connection");
             run("sr_cs_check");
+            run("sr_cs_round");
+            Check(round_count(nullptr) == 6,"round API still available after player reconnect");
             Check(action_count(nullptr) == 6 && occurrences("CSTRIKE_ACTIONS_OK") == 2, "new player handle dispatches after reconnect");
             run("keel plugins unload 2"); Check(contains("plugin unload is blocked"), "script retains Counter-Strike provider");
-            run("sr plugins pause hello"); run("sr_cs_check"); run("sr_cs_stats");
+            run("sr plugins pause hello"); run("sr_cs_check"); run("sr_cs_stats"); run("sr_cs_round");
+            Check(round_count(nullptr) == 6,"paused script cannot terminate rounds");
             Check(action_count(nullptr) == 6 && write_count() == 4, "paused script cannot dispatch its command");
-            run("sr plugins resume hello"); run("sr plugins reload hello"); run("sr_cs_check"); run("sr_cs_stats");
+            run("sr plugins resume hello"); run("sr plugins reload hello"); run("sr_cs_check"); run("sr_cs_stats"); run("sr_cs_round");
+            Check(round_count(nullptr) == 9 && occurrences("CSTRIKE_ROUND_OK") == 3,"script reload rebinds round natives");
             Check(occurrences("CSTRIKE_SCRIPT_OK") == 2 && action_count(nullptr) == 9, "script reload rebinds actions");
             Check(occurrences("CSTRIKE_STATS_OK") == 2 && write_count() == 8, "script reload rebinds statistics");
             run("sr plugins unload hello"); run("keel plugins unload 2"); run("keel plugins load sr_example" + extension);
-            run("sr plugins load hello"); run("sr_cs_check"); run("sr_cs_stats");
+            run("sr plugins load hello"); run("sr_cs_check"); run("sr_cs_stats"); run("sr_cs_round");
+            Check(round_count(nullptr) == 12 && occurrences("CSTRIKE_ROUND_OK") == 4,"provider reload rebinds round natives");
             Check(occurrences("CSTRIKE_SCRIPT_OK") == 3 && action_count(nullptr) == 12 && !contains("CSTRIKE_FAILED"), "provider reload rebinds actions");
             Check(occurrences("CSTRIKE_STATS_OK") == 3 && write_count() == 12, "provider reload rebinds statistics");
             run("sr plugins unload hello");

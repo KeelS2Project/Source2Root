@@ -5,6 +5,7 @@
 #include <thread>
 
 void RunStatisticsChecks();
+void RunRoundChecks();
 
 namespace {
 using source2root::cstrike::Players;
@@ -107,6 +108,7 @@ int main() {
         auto bad = management; bad.apply = nullptr;
         Fails([&] { Players invalid(owner,entity_api,player_api,runtime,bad); });
         RunStatisticsChecks();
+        RunRoundChecks();
         std::cout << "Counter-Strike backend checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

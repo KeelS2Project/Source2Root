@@ -42,3 +42,38 @@ native bool CS_GetPlayerMVPs(Player player, int &mvps);
 // A failed notification can follow a completed write; no rollback is promised.
 native bool CS_SetPlayerScore(Player player, int score);
 native bool CS_SetPlayerMVPs(Player player, int mvps);
+
+enum CSRoundEndReason
+{
+    CSRound_TargetBombed = 1,
+    CSRound_TerroristsEscaped = 4,
+    CSRound_CTsPreventEscape = 5,
+    CSRound_EscapingTerroristsNeutralized = 6,
+    CSRound_BombDefused = 7,
+    CSRound_CTsWin = 8,
+    CSRound_TerroristsWin = 9,
+    CSRound_Draw = 10,
+    CSRound_AllHostagesRescued = 11,
+    CSRound_TargetSaved = 12,
+    CSRound_HostagesNotRescued = 13,
+    CSRound_TerroristsNotEscaped = 14,
+    CSRound_GameCommencing = 16,
+    CSRound_TerroristsSurrender = 17,
+    CSRound_CTsSurrender = 18,
+    CSRound_TerroristsPlanted = 19,
+    CSRound_CTsReachedHostage = 20,
+    CSRound_SurvivalWin = 21,
+    CSRound_SurvivalDraw = 22
+};
+#define CS_ROUND_CAP_TERMINATE 1
+// Optional keels2.round_control API 1; absent service leaves player APIs usable.
+// Returns binary support, not current map/round readiness. Output zero on error.
+native bool CS_GetRoundCapabilities(int &capabilities);
+// Dispatch the game's round termination routine for the current map. Delay is
+// finite 0..3600 seconds. Reason identifiers are CS2 values, not Source1 enums.
+// winningTeam is 0 (game chooses), 2 (T) or 3 (CT); arbitrary survival squad IDs
+// are not supported. Select a reason appropriate for the current game mode.
+// Engine callbacks may replace map/round state. Success means dispatch, not a
+// completed transition. Repeated calls/game logic may supersede the result.
+// No OnTerminateRound forward or blockhook option is provided by this API.
+native bool CS_TerminateRound(float delay, CSRoundEndReason reason, int winningTeam = 0);
