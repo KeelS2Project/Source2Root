@@ -167,6 +167,28 @@ int main(int argc, char** argv) {
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
             return 0;
         }
+        if (argc == 12 && std::string(argv[10]) == "database") {
+            Check(contains("SQLITE_SCRIPT_OK"), "database module executes actual script and bound SQL values");
+            run("keel plugins unload 2");
+            run("sr plugins list");
+            Check(contains("plugin unload is blocked"), "provider remains while used by a script");
+            run("sr plugins reload hello");
+            const std::string reloaded = messages();
+            const auto first = reloaded.find("SQLITE_SCRIPT_OK");
+            Check(first != std::string::npos && reloaded.find("SQLITE_SCRIPT_OK", first + 1) != std::string::npos,
+                "staged reload executes database script and cleans retired resources");
+            run("sr plugins unload hello");
+            run("keel plugins unload 2");
+            frame();
+            run("keel plugins load sr_example" + extension);
+            frame();
+            run("sr plugins load hello");
+            Check(!stop(), "global stop first releases script leases and retains extension images");
+            Check(stop(), "global stop retry destroys database resources before releasing extension images");
+            Check(network_stop(), "database fixture network teardown");
+            std::cout << messages() << "Database native module lifecycle passed\n";
+            return 0;
+        }
         Check(contains("SR_ExampleAdd registered"), "real example module registration");
         if (argc == 12 && std::string(argv[10]) == "late") {
             const auto registrations = count();

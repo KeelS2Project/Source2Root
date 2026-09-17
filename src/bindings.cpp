@@ -239,8 +239,9 @@ void Foundation::Bind(Script& script) {
         ++provider.users;
         script.providers.insert(registration);
         runtime_.Bind(*script.vm, provider.name.c_str(), static_cast<int>(provider.argc),
-            [this, &provider](const Arguments& args) -> Cell {
+            [this, &script, &provider](const Arguments& args) -> Cell {
                 Thread();
+                if (provider.context_invoke) return InvokeContextNative(script, provider, args);
                 std::vector<Cell> arguments;
                 for (unsigned i = 1; i <= provider.argc; ++i) arguments.push_back(args.Int(static_cast<int>(i)));
                 char error[512]{};

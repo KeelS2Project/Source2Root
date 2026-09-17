@@ -17,3 +17,6 @@ acquired at revisions in `dependencies.lock.json` and retain their own notices.
   archive must accompany the developer/source packages with the MIT notice.
 * SwiftlyS2 is inspected as a primary reference, not imported. Its center HTML
   event and keyboard-state approach informs the backend; no source is copied.
+
+* SQLite 3.53.4: public domain. The pinned amalgamation retains its original
+  notices. See https://www.sqlite.org/copyright.html.

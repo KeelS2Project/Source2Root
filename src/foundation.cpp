@@ -458,6 +458,7 @@ bool Foundation::Cleanup(Script& script) {
         if (owners.empty()) events_.erase(it->first);
         it = script.events.erase(it);
     }
+    handles_.Retire(script.owner, ExtensionType);
     for (auto it = script.providers.begin(); it != script.providers.end();) {
         auto& provider = providers_.at(*it);
         if (provider.active || (ProviderUsers(provider) == 1 &&

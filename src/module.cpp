@@ -67,6 +67,9 @@ public:
             api_ = {sizeof(api_), SR_EXTENSION_API_VERSION, this, &RegisterNative, &UnregisterNative, &OpenMenu, &CloseMenu};
             if (services_.Publish(SR_EXTENSION_SERVICE, SR_EXTENSION_API_VERSION, &api_, publication_) != KEEL_RESULT_OK)
                 throw std::runtime_error("could not publish extension API");
+            native_api_ = {sizeof(native_api_), SR_NATIVE_API_VERSION, this, &RegisterContextNative, &UnregisterNative};
+            if (services_.Publish(SR_NATIVE_SERVICE, SR_NATIVE_API_VERSION, &native_api_, native_publication_) != KEEL_RESULT_OK)
+                throw std::runtime_error("could not publish native call API");
             if (!CreateCommand("sr", "Source2Root management", &Source2Root::Manage) ||
                 !CreateCommand("sr_menu", "Menu input: up/down/select/back [session]", &Source2Root::MenuCommand,
                     FCVAR_CLIENT_CAN_EXECUTE | FCVAR_GAMEDLL))
@@ -95,6 +98,11 @@ public:
     bool PrepareUnload() override {
         if (runtime_.CheckGameThread() != KEEL_RESULT_OK || !foundation_) return !foundation_;
         if (!foundation_->Shutdown()) return false;
+        if (native_publication_) {
+            const auto result = services_.Withdraw(native_publication_);
+            if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
+            native_publication_ = 0;
+        }
         if (publication_) {
             auto result = services_.Withdraw(publication_);
             if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
@@ -415,6 +423,8 @@ private:
     keels2::source2::Service source2_;
     keels2::source2::NativeRuntime runtime_;
     SrExtensionApi api_{};
+    SrNativeApi native_api_{};
+    KeelServiceHandle native_publication_ = 0;
     KeelServiceHandle publication_ = 0;
     std::string last_menu_error_;
     KeelConVarHandle restart_ = 0;
@@ -670,6 +680,10 @@ private:
     static KeelResult RegisterNative(void* context, KeelPluginHandle owner, const SrNativeSpec* spec, SrRegistration* result) {
         if (!spec || !result) return KEEL_RESULT_INVALID_ARGUMENT;
         return Call(context, [&](auto& core) { return core.RegisterNative(owner, *spec, *result); });
+    }
+    static KeelResult RegisterContextNative(void* context, KeelPluginHandle owner, const SrContextNativeSpec* spec, SrRegistration* result) {
+        if (!spec || !result) return KEEL_RESULT_INVALID_ARGUMENT;
+        return Call(context, [&](auto& core) { return core.RegisterContextNative(owner, *spec, *result); });
     }
     static KeelResult UnregisterNative(void* context, KeelPluginHandle owner, SrRegistration registration) {
         return Call(context, [&](auto& core) { return core.UnregisterNative(owner, registration); }, true);

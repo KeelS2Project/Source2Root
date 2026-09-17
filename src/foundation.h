@@ -10,6 +10,7 @@
 #include "menu.h"
 #include "runtime.h"
 #include <source2root/extension.h>
+#include <source2root/native.h>
 
 #include <chrono>
 #include <map>
@@ -106,6 +107,7 @@ public:
     bool MenuInput(const Player& player, std::uint64_t session, sr::MenuInput input);
     std::uint64_t CurrentMenu(const Player& player) const;
     KeelResult RegisterNative(KeelPluginHandle owner, const SrNativeSpec& spec, SrRegistration& registration);
+    KeelResult RegisterContextNative(KeelPluginHandle owner, const SrContextNativeSpec& spec, SrRegistration& registration);
     KeelResult UnregisterNative(KeelPluginHandle owner, SrRegistration registration);
     KeelResult OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerConnection& player,
         const SrMenuSpec& spec, SrMenuSession& session);
@@ -146,8 +148,19 @@ private:
     struct ScriptMenu { Menu menu; SourcePawn::IPluginFunction* callback; SourcePawn::IPluginFunction* back = nullptr; };
     struct ScriptConVar { std::string name; };
     struct ConfigFile { std::string text; std::size_t cursor = 0; };
-    using Resource = std::variant<Player, Timer, ScriptMenu, ScriptConVar, ConfigFile>;
-    static constexpr unsigned PlayerType = 1, TimerType = 2, MenuType = 3, ConVarType = 4, ConfigFileType = 5;
+    struct ExtensionValue {
+        void* data = nullptr;
+        SrResourceDestroy destroy = nullptr;
+        bool owned = false;
+        ~ExtensionValue() noexcept { if (owned) { try { destroy(data); } catch (...) {} } }
+    };
+    struct ExtensionResource {
+        KeelPluginHandle provider;
+        std::uint32_t type;
+        std::shared_ptr<ExtensionValue> value;
+    };
+    using Resource = std::variant<Player, Timer, ScriptMenu, ScriptConVar, ConfigFile, ExtensionResource>;
+    static constexpr unsigned PlayerType = 1, TimerType = 2, MenuType = 3, ConVarType = 4, ConfigFileType = 5, ExtensionType = 6;
     struct Variable {
         ConVarDefinition definition;
         std::uint64_t native = 0;
@@ -169,7 +182,10 @@ private:
         unsigned version, argc, users = 0, active = 0;
         SrNativeFunction invoke;
         void* user_data;
+        SrContextNativeFunction context_invoke = nullptr;
     };
+    struct NativeInvocation;
+    Cell InvokeContextNative(Script& script, Provider& provider, const Arguments& args);
     struct NativeDisplay {
         std::uint64_t session;
         KeelPluginHandle owner;
