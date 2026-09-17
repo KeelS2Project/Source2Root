@@ -6,6 +6,18 @@
       "database": "shared",
       "allow_plugins": ["database_example"]
     },
+    "postgresql": {
+      "driver": "postgresql",
+      "host": "database.example.com",
+      "port": 5432,
+      "database": "source2root",
+      "user": "source2root",
+      "password": "replace-me",
+      "tls": true,
+      "ca": "/etc/ssl/certs/database-ca.pem",
+      "timeout": 3,
+      "allow_plugins": ["postgresql_example"]
+    },
     "network": {
       "driver": "mysql",
       "host": "database.example.com",

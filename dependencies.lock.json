@@ -74,5 +74,15 @@
     "repository": "https://github.com/curl/curl",
     "url": "https://github.com/curl/curl/releases/download/curl-8_22_0/curl-8.22.0.tar.xz",
     "sha256": "f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7"
+  },
+  "postgresql": {
+    "version": "18.6",
+    "url": "https://ftp.postgresql.org/pub/source/v18.6/postgresql-18.6.tar.bz2",
+    "sha256": "555610c24d53e4316da5b7d3fc25c279d96856d5e0e23ee308c328c5fa881d9f"
+  },
+  "meson": {
+    "version": "1.12.0",
+    "url": "https://files.pythonhosted.org/packages/07/68/b0117422eb0a46d9d8d9e328f0c5b5c835179bfc058688bca35c90c89eba/meson-1.12.0-py3-none-any.whl",
+    "sha256": "71f133147fa0fcfe8f4df49fa1045771064947834538409e5d97b3613aac8b4e"
   }
 }

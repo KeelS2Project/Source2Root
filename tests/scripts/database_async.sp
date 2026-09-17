@@ -13,7 +13,11 @@ SQLRequest Configured(const char[] sql, SQLCallback callback, any data = 0)
 SQLRequest Submit()
 {
 #if defined DATABASE_CONFIGURED
+#if defined DATABASE_POSTGRESQL
+    SQLQuery query = SQL_CreateQuery("SELECT $1::integer,$2::double precision,$3::text,$4::text,2147483648");
+#else
     SQLQuery query = SQL_CreateQuery("SELECT ?,?,?,?,2147483648");
+#endif
     if (query == NoSQLQuery || !SQL_QueryBindInt(query, 1, 42) || !SQL_QueryBindFloat(query, 2, 1.25)
         || !SQL_QueryBindString(query, 3, "quoted value") || !SQL_QueryBindNull(query, 4))
         return NoSQLRequest;

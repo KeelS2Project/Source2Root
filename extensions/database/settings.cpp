@@ -74,14 +74,14 @@ Settings ReadSettings(const std::filesystem::path& file, const std::string& prof
             if (!Name(result.database)) throw Error("Invalid configured SQLite database name.");
             return result;
         }
-        if (result.driver != "mysql" && result.driver != "mariadb") throw Error("Unsupported database driver.");
+        if (result.driver != "mysql" && result.driver != "mariadb" && result.driver != "postgresql") throw Error("Unsupported database driver.");
         if (result.database.empty()) throw Error("Database name is required.");
         result.host = Text(config, "host", result.host, 255);
         result.user = Text(config, "user", "", 128);
         result.password = Text(config, "password");
         result.socket = Text(config, "socket");
         result.ca = Text(config, "ca");
-        result.port = Number(config, "port", result.port, 65535);
+        result.port = Number(config, "port", result.driver == "postgresql" ? 5432 : result.port, 65535);
         result.timeout = Number(config, "timeout", result.timeout, 30);
         result.tls = config.value("tls", true);
         if (result.host.empty() || result.user.empty()) throw Error("Database host and user are required.");
@@ -90,9 +90,32 @@ Settings ReadSettings(const std::filesystem::path& file, const std::string& prof
             throw Error("Database socket and CA paths must be absolute.");
         if (!result.tls && result.socket.empty() && result.host != "127.0.0.1" && result.host != "::1" && result.host != "localhost")
             throw Error("Remote database connections require verified TLS.");
+        if (result.driver == "postgresql") ValidatePostgreSQLSettings(result);
         return result;
     } catch (const Error&) { throw; }
     catch (const std::exception&) { throw Error("Invalid database configuration."); }
+}
+
+void ValidatePostgreSQLSettings(const Settings& settings) {
+    const auto valid = [](const std::string& value, std::size_t limit) {
+        return value.size() <= limit && std::none_of(value.begin(), value.end(), [](unsigned char c) { return c < 32 || c == 127; });
+    };
+    if (settings.driver != "postgresql" || settings.database.empty() || settings.user.empty() || settings.host.empty() ||
+        !valid(settings.database, 64) || !valid(settings.user, 128) || !valid(settings.password, 1024) ||
+        !valid(settings.host, 255) || !valid(settings.socket, 1024) || !valid(settings.ca, 1024) ||
+        !settings.port || settings.port > 65535 || !settings.timeout || settings.timeout > 30)
+        throw Error("Invalid PostgreSQL connection settings.");
+    if (std::any_of(settings.host.begin(), settings.host.end(), [](unsigned char c) {
+        return !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '-' || c == '_' || c == ':' || c == '%');
+    })) throw Error("PostgreSQL host must be one hostname or IP address; use socket for a Unix socket directory.");
+    if (!settings.ca.empty() && !std::filesystem::path(settings.ca).is_absolute()) throw Error("Database CA path must be absolute.");
+    if (!settings.socket.empty()) {
+        if (!std::filesystem::path(settings.socket).is_absolute() || settings.socket.find(',') != std::string::npos)
+            throw Error("PostgreSQL socket must be one absolute directory path.");
+        if (settings.tls) throw Error("PostgreSQL Unix sockets require explicit tls=false; libpq cannot negotiate TLS over Unix sockets.");
+    } else if (!settings.tls && settings.host != "127.0.0.1" && settings.host != "::1" && settings.host != "localhost")
+        throw Error("Remote database connections require verified TLS.");
 }
 
 }

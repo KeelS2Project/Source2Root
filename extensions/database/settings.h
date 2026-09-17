@@ -11,5 +11,6 @@ struct Settings {
     bool tls = true;
 };
 Settings ReadSettings(const std::filesystem::path& file, const std::string& profile, const std::string& plugin);
+void ValidatePostgreSQLSettings(const Settings& settings);
 
 }

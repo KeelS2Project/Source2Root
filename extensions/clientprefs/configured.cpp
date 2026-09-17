@@ -20,6 +20,8 @@ StorageFactory ConfiguredStorage(std::filesystem::path data, std::filesystem::pa
         if (status.type() != std::filesystem::file_type::not_found)
             settings = db::ReadSettings(config, "clientprefs", "source2root.clientprefs");
         const bool local = settings.driver == "sqlite";
+        if (!local && settings.driver != "mysql" && settings.driver != "mariadb")
+            throw Error("Client preferences supports SQLite and MySQL/MariaDB profiles only.");
         const auto filename = data / (settings.database + ".sqlite");
         const Target target = local ? Target{"sqlite", filename.lexically_normal().string(), "", 0, ""}
             : Target{"mysql", settings.database, settings.socket.empty() ? settings.host : "",

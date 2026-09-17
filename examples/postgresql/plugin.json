@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "postgresql_example",
+  "name": "PostgreSQL example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "postgresql.smx",
+  "source": "postgresql.sp",
+  "enabled": true,
+  "dependencies": []
+}

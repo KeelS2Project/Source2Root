@@ -72,4 +72,19 @@ native SQLRequest SQL_ExecuteSQLiteAsync(const char[] name, SQLQuery query, SQLC
 // Each request opens a private connection. MySQL/MariaDB uses verified TLS for
 // remote TCP, finite connect/read/write timeouts and prepared parameters. Its
 // transaction guarantees depend on table engines and implicit-commit SQL.
+// PostgreSQL uses $1..$64 placeholders (SQLite/MySQL use ?), text results in
+// UTF-8, and one explicit transaction committed after all bounded rows arrive.
+// Transaction/session-control and COPY commands are rejected. Use RETURNING
+// to obtain generated IDs; SQL_ResultInsertId returns "0" for PostgreSQL.
+// Changes is the server command's row count (including SELECT). Boolean text
+// is t/f; integer/float getters also map it to 1/0. Binary bytea remains encoded
+// PostgreSQL text. A large single wire row can exceed the retained-output limit
+// inside libpq before rejection. Cancellation closes without draining rows;
+// connect, server statement_timeout and lock_timeout use profile timeout seconds, with
+// a cooperative client deadline of three times timeout (OS DNS/file I/O can
+// outlast it). Writes already committed/external side effects cannot be undone.
+// PostgreSQL defaults to port 5432, verified TLS with OS roots or explicit ca.
+// Local plaintext requires tls=false; socket is an absolute Unix directory and
+// also requires tls=false. PGSERVICE must be unset; ambient connection routes,
+// passwords, password files and client certificates are not imported.
 native SQLRequest SQL_ExecuteAsync(const char[] profile, SQLQuery query, SQLCallback callback, any data = 0);

@@ -37,6 +37,19 @@ int main(int argc, char** argv) {
         }
         mysql(",\"tls\":false,\"host\":\"127.0.0.1\"");
         Check(!ReadSettings(file, "network", "example").tls, "explicit local plaintext allowed");
+        auto postgresql = [&](const std::string& fields) {
+            write("{\"schema\":1,\"connections\":{\"network\":{\"driver\":\"postgresql\",\"database\":\"game\",\"user\":\"game\",\"allow_plugins\":[\"example\"]" + fields + "}}}");
+        };
+        postgresql("");
+        Check(ReadSettings(file, "network", "example").port == 5432 && ReadSettings(file, "network", "example").tls,
+            "PostgreSQL defaults to its own port and verified TLS");
+        for (const auto* fields : {",\"host\":\"one,two\"", ",\"host\":\"/tmp\"", ",\"socket\":\"/tmp/pgsql\"",
+                ",\"socket\":\"/tmp/one,/tmp/two\",\"tls\":false", ",\"host\":\"remote.example\",\"tls\":false"}) {
+            postgresql(fields);
+            Reject([&] { ReadSettings(file, "network", "example"); }, "PostgreSQL route and TLS policy enforced");
+        }
+        postgresql(",\"tls\":false");
+        Check(!ReadSettings(file, "network", "example").tls, "explicit PostgreSQL loopback plaintext supported");
         write("{\"password\":\"secret-sentinel\"");
         Reject([&] { ReadSettings(file, "network", "example"); }, "malformed secret configuration reported safely");
         write(std::string(65537, 'a'));

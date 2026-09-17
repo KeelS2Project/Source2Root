@@ -1,6 +1,9 @@
 #include "database.h"
 #include "query.h"
 #include "settings.h"
+#if defined(SR_POSTGRESQL_DRIVER)
+#include "driver.h"
+#endif
 #if defined(SR_MYSQL_DRIVER)
 #include "mysql_driver.h"
 #endif
@@ -187,6 +190,13 @@ private:
                     std::filesystem::create_directories(shared);
                     if (std::filesystem::is_symlink(shared)) throw source2root::db::Error("Database directory must not be a symbolic link.");
                     return source2root::sqlite::Query(shared / (settings.database + ".sqlite"), input, canceled);
+                }
+                if (settings.driver == "postgresql") {
+#if defined(SR_POSTGRESQL_DRIVER)
+                    return source2root::postgresql::Query(settings, input, canceled);
+#else
+                    throw source2root::db::Error("PostgreSQL driver is not installed.");
+#endif
                 }
 #if defined(SR_MYSQL_DRIVER)
                 return source2root::mysql::Query(settings, input, canceled);

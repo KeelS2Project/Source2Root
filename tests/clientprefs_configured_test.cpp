@@ -52,6 +52,11 @@ static void LocalChecks(const std::filesystem::path& root) {
     auto invalid = Local("valid"); invalid["connections"]["clientprefs"]["allow_plugins"] = {"another_plugin"};
     Write(path, invalid);
     Reject([&] { fresh(); }, "service identity must be permitted");
+    auto postgres = Local("valid");
+    postgres["connections"]["clientprefs"]["driver"] = "postgresql";
+    postgres["connections"]["clientprefs"]["user"] = "fixture";
+    Write(path, postgres);
+    Reject([&] { fresh(); }, "unsupported preferences driver rejected before connecting or pinning a target");
     Write(path, Local("valid"));
     fresh()->Register(Music);
     std::filesystem::remove(path);
