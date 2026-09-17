@@ -62,5 +62,11 @@
     "repository": "https://github.com/maxmind/libmaxminddb",
     "url": "https://github.com/maxmind/libmaxminddb/releases/download/1.14.0/libmaxminddb-1.14.0.tar.gz",
     "sha256": "65ff92382c71ef6634b8c13e278651a2efa68f1de28ef3c31fc32369fa0bb3e3"
+  },
+  "pcre2": {
+    "version": "10.48",
+    "repository": "https://github.com/PCRE2Project/pcre2",
+    "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.gz",
+    "sha256": "ebcc25aadf2a51fa1fefa9b8bc9e7a79b3dae86870a0f1152a22e42befd46888"
   }
 }

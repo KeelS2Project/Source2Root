@@ -203,6 +203,40 @@ int main(int argc, char** argv) {
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
             return 0;
         }
+        if (argc == 12 && std::string(argv[10]) == "regex") {
+            auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned count = 0; std::size_t at = 0;
+                while ((at = log.find(value, at)) != std::string::npos) { ++count; at += std::strlen(value); }
+                return count;
+            };
+            Check(contains("REGEX_SCRIPT_OK"), "regex compiled script initialization");
+            run("sr_regex_check");
+            Check(contains("REGEX_RETAINED_OK"), "owned captures survive pattern close");
+            run("sr_regex_wrong");
+            Check(contains("Foreign extension or wrong resource type."), "wrong regex resource type raises native error");
+            run("sr_regex_stale");
+            Check(contains("stale, foreign or wrong-type handle") && !contains("REGEX_FAILED"), "stale regex handle raises native error");
+            run("sr_regex_quota");
+            Check(occurrences("REGEX_QUOTA_OK") == 1 && !contains("REGEX_FAILED"), "provider pattern and result quotas");
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked"), "script lease retains regex provider");
+            run("sr plugins reload hello");
+            run("sr_regex_check");
+            Check(occurrences("REGEX_SCRIPT_OK") == 2 && !contains("REGEX_FAILED"), "staged regex script reload succeeds");
+            run("sr_regex_quota");
+            Check(occurrences("REGEX_QUOTA_OK") == 2 && !contains("REGEX_FAILED"), "reload releases prior resources and quota");
+            run("sr plugins unload hello");
+            run("keel plugins unload 2");
+            run("keel plugins load sr_example" + extension);
+            run("sr plugins load hello");
+            run("sr_regex_check");
+            Check(occurrences("REGEX_SCRIPT_OK") == 3 && !contains("REGEX_FAILED"), "regex extension reload rebinds native functions");
+            run("sr plugins unload hello");
+            Check(stop(), "regex fixture host stop after script resources release");
+            Check(network_stop(), "regex fixture teardown");
+            std::cout << messages() << "Regex module lifecycle passed\n";
+            return 0;
+        }
         if (argc == 12 && std::string(argv[10]) == "geoip") {
             auto await = [&](auto ready) {
                 const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);

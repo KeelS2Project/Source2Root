@@ -104,6 +104,7 @@ target_include_directories(source2root_random PRIVATE include)
 target_link_libraries(source2root_random PRIVATE KeelS2::SDK KeelS2::SourceSDK)
 include(cmake/Source2RootExtensions.cmake)
 include(cmake/Source2RootGeoIP.cmake)
+include(cmake/Source2RootRegex.cmake)
 if(WIN32)
     set(SR_SP_ARCH "windows-x86_64")
     set(SR_SP_LIBRARY "${SOURCEPAWN_BUILD}/libsourcepawn/${SR_SP_ARCH}/libsourcepawn.dll")
@@ -118,7 +119,7 @@ function(sr_compile_script name source)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/scripts"
         COMMAND "${SR_SPCOMP}" "${source}" -i scripting/include -i plugins/include -o "${CMAKE_BINARY_DIR}/scripts/${name}.smx"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc scripting/include/source2root_clientprefs.inc scripting/include/source2root_geoip.inc plugins/include/admin_shared.inc)
+        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc scripting/include/source2root_clientprefs.inc scripting/include/source2root_geoip.inc scripting/include/source2root_regex.inc plugins/include/admin_shared.inc)
     add_custom_target(script_${name} ALL DEPENDS "${CMAKE_BINARY_DIR}/scripts/${name}.smx")
 endfunction()
 sr_compile_script(player_status examples/player_status/player_status.sp)
@@ -128,6 +129,7 @@ sr_compile_script(roll examples/roll/roll.sp)
 sr_compile_script(database_example examples/database/database.sp)
 sr_compile_script(preferences_example examples/preferences/preferences.sp)
 sr_compile_script(geoip_example examples/geoip/geoip.sp)
+sr_compile_script(regex_example examples/regex/regex.sp)
 sr_compile_script(admin plugins/admin/admin.sp)
 sr_compile_script(player_actions plugins/player_actions/player_actions.sp)
 sr_compile_script(moderation plugins/moderation/moderation.sp)
@@ -135,6 +137,13 @@ sr_compile_script(communications plugins/communications/communications.sp)
 sr_compile_script(server plugins/server/server.sp)
 if(BUILD_TESTING)
     find_package(Threads REQUIRED)
+    if(SR_REGEX_EXTENSION)
+        add_executable(sr_regex_test tests/regex_test.cpp)
+        target_link_libraries(sr_regex_test PRIVATE sr_regex Threads::Threads)
+        add_test(NAME regex_backend COMMAND sr_regex_test)
+        set_tests_properties(regex_backend PROPERTIES TIMEOUT 15)
+        sr_compile_script(regex tests/scripts/regex.sp)
+    endif()
     if(SR_GEOIP_EXTENSION)
         add_executable(sr_geoip_test tests/geoip_test.cpp)
         target_link_libraries(sr_geoip_test PRIVATE sr_geoip Threads::Threads)
@@ -288,6 +297,14 @@ if(BUILD_TESTING)
             "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/hello.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
             "${CMAKE_BINARY_DIR}/test-fixtures/late-modules" "late" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
         set_tests_properties(native_late_load PROPERTIES TIMEOUT 30)
+        if(SR_REGEX_EXTENSION)
+            add_test(NAME regex_native_module COMMAND sr_module_integration
+                "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
+                $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_regex>
+                "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/regex.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+                "${CMAKE_BINARY_DIR}/test-fixtures/regex-module" "regex" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
+            set_tests_properties(regex_native_module PROPERTIES TIMEOUT 30)
+        endif()
         if(SR_GEOIP_EXTENSION)
             add_test(NAME geoip_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "regex_example",
+  "name": "Regex Example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "regex.smx",
+  "source": "regex.sp",
+  "enabled": true,
+  "dependencies": []
+}
