@@ -63,6 +63,9 @@ public:
     std::uint64_t input_buttons = 0, input_context = 1;
     KeelResult input_status = KEEL_RESULT_OK;
     KeelPlayerAction last_action{};
+    unsigned management_caps = 7, management_count = 0;
+    KeelResult management_cap_status = KEEL_RESULT_OK, management_status = KEEL_RESULT_OK;
+    KeelPlayerManagementAction last_management{};
     KeelResult ReadPlayer(int slot, KeelPlayerInfo& player) {
         if (lookup != KEEL_RESULT_OK) return lookup;
         if (!connected && slot == 3) return KEEL_RESULT_NOT_FOUND;
@@ -349,6 +352,43 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureSetConVar(const char* name, 
     return active && name && value && active->SetVariable(name, value);
 }
 
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerManagement(
+    uint32_t version, keels2::host::GameAdapterPlayerManagementApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api), 1,
+        [](keels2::host::GameAdapter* adapter, unsigned* capabilities) noexcept -> KeelResult {
+            if (capabilities) *capabilities = 0;
+            if (!adapter || !capabilities) return KEEL_RESULT_INVALID_ARGUMENT;
+            const auto* state = static_cast<Adapter*>(adapter);
+            if (state->management_cap_status != KEEL_RESULT_OK) return state->management_cap_status;
+            *capabilities = state->management_caps; return KEEL_RESULT_OK;
+        },
+        [](keels2::host::GameAdapter* adapter, const keels2::host::GameEntityIdentity* controller,
+            const KeelPlayerManagementAction* action) noexcept -> KeelResult {
+            if (!adapter || !controller || !action) return KEEL_RESULT_INVALID_ARGUMENT;
+            auto* state = static_cast<Adapter*>(adapter);
+            try {
+                std::string error;
+                const auto valid = state->ValidateEntity(*controller, error);
+                if (valid != KEEL_RESULT_OK) return valid;
+                if (controller->source2_handle != 0x12003) return KEEL_RESULT_INCOMPATIBLE;
+                if (state->management_status != KEEL_RESULT_OK) return state->management_status;
+                ++state->management_count; state->last_management = *action;
+                return KEEL_RESULT_OK;
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureManagementCount(KeelPlayerManagementAction* last) {
+    if (!active) return 0;
+    if (last) *last = active->last_management;
+    return active->management_count;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureManagementState(unsigned caps, unsigned capability_result, unsigned action_result) {
+    if (active) { active->management_caps = caps; active->management_cap_status = capability_result; active->management_status = action_result; }
+}
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayers(uint32_t version, keels2::host::GameAdapterPlayersApi* api) noexcept {
     if (version != 1 || !api || api->size != sizeof(*api)) return KEEL_RESULT_INCOMPATIBLE;
     *api = {sizeof(*api), 1, []() noexcept -> uint32_t { return 64; },

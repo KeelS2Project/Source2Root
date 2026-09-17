@@ -1,3 +1,4 @@
+#include <keels2/player_management.h>
 #include <keels2/player_actions.h>
 #include <keels2/player_input.h>
 #include <cmath>
@@ -253,6 +254,48 @@ int main(int argc, char** argv) {
             Check(!contains("HTTP_SCRIPT_FAILED") && !contains("HTTP_NATIVE_FAILED"), "HTTP close/unload cancels outstanding callbacks and drains workers");
             Check(network_stop(), "HTTP fixture teardown");
             std::cout << messages() << "HTTP native and script module lifecycle passed\n";
+            return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "cstrike") {
+            auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned count = 0; std::size_t at = 0;
+                while ((at = log.find(value, at)) != std::string::npos) { ++count; at += std::strlen(value); }
+                return count;
+            };
+            const auto action_count = adapter.Get<unsigned (*)(KeelPlayerManagementAction*)>("SrFixtureManagementCount");
+            const auto action_state = adapter.Get<void (*)(unsigned,unsigned,unsigned)>("SrFixtureManagementState");
+            Check(occurrences("CSTRIKE_SCRIPT_OK") == 1 && action_count(nullptr) == 0, "Counter-Strike initialization has no player actions");
+            run("sr_cs_check");
+            KeelPlayerManagementAction last{};
+            Check(occurrences("CSTRIKE_ACTIONS_OK") == 1 && action_count(&last) == 3 &&
+                last.kind == KEELS2_PLAYER_MANAGEMENT_SWITCH_TEAM && last.team == 3, "three script actions reach the owned controller");
+            run("sr_cs_invalid");
+            Check(contains("CSTRIKE_INVALID_OK") && action_count(nullptr) == 3, "invalid team and player cannot dispatch");
+            action_state(0,KEEL_RESULT_OK,KEEL_RESULT_OK);
+            run("sr_cs_unavailable");
+            Check(contains("CSTRIKE_UNAVAILABLE_OK") && action_count(nullptr) == 3, "unsupported actions cannot dispatch");
+            action_state(7,KEEL_RESULT_UNSUPPORTED,KEEL_RESULT_OK);
+            run("sr_cs_caps_error");
+            Check(contains("CSTRIKE_CAPS_ERROR_OK") && action_count(nullptr) == 3, "capability failure clears output and records error");
+            action_state(7,KEEL_RESULT_OK,KEEL_RESULT_ENGINE_FAILURE);
+            run("sr_cs_action_error");
+            Check(contains("CSTRIKE_ACTION_ERROR_OK") && action_count(nullptr) == 3, "engine rejection reaches script");
+            action_state(7,KEEL_RESULT_OK,KEEL_RESULT_OK);
+            reconnect(); run("sr_cs_reconnected");
+            Check(contains("CSTRIKE_RECONNECTED_OK") && action_count(nullptr) == 3, "saved player cannot target replacement connection");
+            run("sr_cs_check");
+            Check(action_count(nullptr) == 6 && occurrences("CSTRIKE_ACTIONS_OK") == 2, "new player handle dispatches after reconnect");
+            run("keel plugins unload 2"); Check(contains("plugin unload is blocked"), "script retains Counter-Strike provider");
+            run("sr plugins pause hello"); run("sr_cs_check");
+            Check(action_count(nullptr) == 6, "paused script cannot dispatch its command");
+            run("sr plugins resume hello"); run("sr plugins reload hello"); run("sr_cs_check");
+            Check(occurrences("CSTRIKE_SCRIPT_OK") == 2 && action_count(nullptr) == 9, "script reload rebinds actions");
+            run("sr plugins unload hello"); run("keel plugins unload 2"); run("keel plugins load sr_example" + extension);
+            run("sr plugins load hello"); run("sr_cs_check");
+            Check(occurrences("CSTRIKE_SCRIPT_OK") == 3 && action_count(nullptr) == 12 && !contains("CSTRIKE_FAILED"), "provider reload rebinds actions");
+            run("sr plugins unload hello");
+            Check(stop(), "Counter-Strike host stop"); Check(network_stop(), "Counter-Strike fixture teardown");
+            std::cout << messages() << "Counter-Strike native module lifecycle passed\n";
             return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "sdktools") {
