@@ -20,8 +20,9 @@ enum PrefMenu { NoPrefMenu = 0 }
 enum PrefMenuType { Pref_YesNo, Pref_YesNoInteger, Pref_OnOff, Pref_OnOffInteger }
 
 // Called on the server thread. Empty error means success. Catalog/cookie
-// callbacks receive NoPlayer. Close the request when finished. Pause retains
-// callbacks; script unload, request close or player disconnect suppresses them.
+// and identity callbacks receive NoPlayer. Close the request when finished.
+// Pause retains callbacks; script unload or request close suppresses them.
+// Player disconnect suppresses player waits, not offline identity waits.
 typedef PrefCallback = function void (PrefRequest request, Player player, any data, const char[] error);
 
 // Registration is asynchronous. Names are global, 1..30 letters/digits/._-;
@@ -63,6 +64,19 @@ native bool Prefs_Retry(Player player = NoPlayer);
 // writes, marks the cache loading, and completes via WhenCached. Same-cookie
 // writes use last committed value; unrelated cookies are never overwritten.
 native bool Prefs_Refresh(Player player);
+
+// Trusted scripts may write an online or offline account without a Player
+// handle. Supply a canonical decimal Steam64 individual public-universe ID.
+// This does not authenticate that person or grant any game permissions.
+// Accepted writes update this server's existing cache, survive disconnect and
+// script unload, and retain failures for Prefs_Retry(). Close/cancel of a wait
+// suppresses only its callback, never an accepted write.
+native bool Prefs_SetIdentity(const char[] steam64, PrefCookie cookie, const char[] value);
+// True means no accepted writes for this account remain pending in this service.
+// It does not prove a record exists or observe another server's pending writes.
+native bool Prefs_IsIdentitySaved(const char[] steam64);
+native bool Prefs_IdentityError(const char[] steam64, char[] output, int capacity);
+native PrefRequest Prefs_WhenIdentitySaved(const char[] steam64, PrefCallback callback, any data = 0);
 
 // Player settings interfaces must use these access-aware operations: public
 // values are visible/writable, protected visible/read-only, private hidden.

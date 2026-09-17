@@ -150,12 +150,43 @@ void Service::Set(const Identity& player, const std::shared_ptr<Cookie>& cookie,
     CheckCookie(cookie); ValidateValue(text);
     const auto account = Current(player);
     if (account->state != State::Ready) throw Error("Client preferences are not cached.");
+    Write(player.account, account, cookie, text, now);
+}
+
+void Service::SetIdentity(std::uint64_t id, const std::shared_ptr<Cookie>& cookie, const std::string& text, std::int64_t now) {
+    CheckCookie(cookie); ValidateAccount(id); ValidateValue(text);
+    if (now < 0) throw Error("Invalid preference timestamp.");
+    auto found = accounts_.find(id);
+    if (found == accounts_.end()) {
+        Evict();
+        if (accounts_.size() == MaxAccounts) throw Error("Client preferences account cache limit (256) reached.");
+        found = accounts_.emplace(id, std::make_shared<Account>()).first;
+        // Queue the snapshot first. Its completion merges the accepted dirty
+        // overlay, so a late load cannot erase an offline write or a newer edit.
+        Load(id, found->second);
+    }
+    Write(id, found->second, cookie, text, now);
+}
+void Service::Write(std::uint64_t id, const std::shared_ptr<Account>& account, const std::shared_ptr<Cookie>& cookie,
+    const std::string& text, std::int64_t now) {
     if (now < 0 || account->revision == std::numeric_limits<std::uint64_t>::max()) throw Error("Invalid preference timestamp or write sequence exhausted.");
     const Value value{text, now, ++account->revision};
     account->values[cookie->definition.name] = value;
     account->dirty[cookie->definition.name] = value;
     account->write_failed = false;
-    Save(player.account, account);
+    Save(id, account);
+}
+bool Service::IdentityPersisted(std::uint64_t id) const {
+    Thread(); ValidateAccount(id);
+    const auto found = accounts_.find(id);
+    // Clean offline accounts may already have been evicted. This is a local
+    // durability status, not a database existence query or a remote cache read.
+    return found == accounts_.end() || (!found->second->saving && found->second->dirty.empty());
+}
+std::string Service::IdentityError(std::uint64_t id) const {
+    Thread(); ValidateAccount(id);
+    const auto found = accounts_.find(id);
+    return found == accounts_.end() ? "" : found->second->write_error;
 }
 
 void Service::UserSet(const Identity& player, const std::string& name, const std::string& text, std::int64_t now) {
@@ -204,6 +235,7 @@ void Service::Save(std::uint64_t id, const std::shared_ptr<Account>& account) {
         account->saving = false;
         account->error = Message(error);
         account->write_failed = bool(error);
+        account->write_error = account->error;
         if (!error) for (const auto& [name, value] : batch) {
             const auto current = account->dirty.find(name);
             if (current != account->dirty.end() && current->second.revision == value.revision) account->dirty.erase(current);
@@ -211,6 +243,7 @@ void Service::Save(std::uint64_t id, const std::shared_ptr<Account>& account) {
     })) return; // Accepted cache writes remain dirty; Pump retries when capacity returns.
     account->saving = true;
     account->error.clear();
+    account->write_error.clear();
 }
 void Service::RetryWrites() {
     Thread();

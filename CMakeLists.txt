@@ -148,8 +148,12 @@ if(BUILD_TESTING)
         add_test(NAME clientprefs_storage COMMAND sr_clientprefs_test storage "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-storage")
         add_test(NAME clientprefs_cache COMMAND sr_clientprefs_test cache "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-cache")
         add_test(NAME clientprefs_menus COMMAND sr_clientprefs_test menus "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-menus")
-        set_tests_properties(clientprefs_storage clientprefs_cache clientprefs_menus PROPERTIES TIMEOUT 30)
+        add_test(NAME clientprefs_offline COMMAND sr_clientprefs_test offline "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-offline")
+        set_tests_properties(clientprefs_storage clientprefs_cache clientprefs_menus clientprefs_offline PROPERTIES TIMEOUT 30)
         sr_compile_script(clientprefs tests/scripts/clientprefs.sp)
+        sr_compile_script(clientprefs_network tests/scripts/clientprefs_network.sp)
+        add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/scripts/clientprefs_network.smx" APPEND
+            DEPENDS tests/scripts/clientprefs.sp)
         sr_compile_script(database tests/scripts/database.sp)
         sr_compile_script(database_async tests/scripts/database_async.sp)
         sr_compile_script(database_configured tests/scripts/database_configured.sp)
@@ -288,10 +292,10 @@ if(BUILD_TESTING)
                 add_test(NAME clientprefs_mysql_module COMMAND sr_module_integration
                     "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
                     $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_clientprefs>
-                    "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/clientprefs.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+                    "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/clientprefs_network.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
                     "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-mysql-module" "clientprefs_mysql" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
                 set_tests_properties(clientprefs_mysql_module PROPERTIES TIMEOUT 60 RESOURCE_LOCK shared_database
-                    ENVIRONMENT "SR_DATABASE_TEST_CONFIG=${SR_DATABASE_TEST_CONFIG}")
+                    ENVIRONMENT "SR_DATABASE_TEST_CONFIG=${SR_DATABASE_TEST_CONFIG};SR_PREFS_SQL_MODULE=$<TARGET_FILE:source2root_database>")
             endif()
             add_test(NAME database_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"

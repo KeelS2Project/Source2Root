@@ -111,6 +111,12 @@ int main(int argc, char** argv) {
             const auto file = script / "configs/extensions/source2root.clientprefs/databases.json";
             Copy(config, file);
             std::filesystem::permissions(file, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+            const auto sql = script / "configs/extensions/source2root.database/databases.json";
+            Copy(config, sql);
+            std::filesystem::permissions(sql, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+            const auto* module = std::getenv("SR_PREFS_SQL_MODULE");
+            Check(module && *module, "shared preferences fixture requires the database module");
+            Copy(module, plugins / ("zz_database" + extension));
         }
         if (argc == 12 && std::string(argv[10]) == "database_configured") {
             const auto file = script / "configs/extensions/source2root.database/databases.json";
@@ -213,6 +219,14 @@ int main(int argc, char** argv) {
             Check(!contains("PREFS_SCRIPT_OK"), "paused VM retains preferences callbacks");
             run("sr plugins resume hello");
             await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 1; });
+            if (std::string(argv[10]) == "clientprefs_mysql")
+                await([&] { frame(); return occurrences("PREFS_NETWORK_OK") >= 1; });
+            run("sr_prefs_offline");
+            authentication(false, false); frame();
+            await([&] { frame(); return occurrences("PREFS_OFFLINE_SAVED") == 1; });
+            authentication(true, false); frame();
+            run("sr plugins reload hello");
+            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 2; });
             run("keel plugins unload 2");
             Check(contains("plugin unload is blocked"), "preferences provider retained while scripts use cookies");
             auto press = [&](std::uint64_t button) {
@@ -233,9 +247,12 @@ int main(int argc, char** argv) {
                 if (!enabled) press(KEELS2_BUTTON_BACK);
                 press(KEELS2_BUTTON_USE);
                 Check(std::string(menu_text()).find("Player preferences") != std::string::npos, "selection returns to shared menu");
+                const auto network_before = occurrences("PREFS_NETWORK_OK");
                 run("sr_prefs_observe");
                 ++menu_saved;
                 await([&] { frame(); return occurrences("PREFS_MENU_SAVED") == menu_saved; });
+                if (std::string(argv[10]) == "clientprefs_mysql")
+                    await([&] { frame(); return occurrences("PREFS_NETWORK_OK") > network_before; });
                 const auto expected = type == 0 ? (enabled ? "yes" : "no") : type == 2 ? (enabled ? "on" : "off") : (enabled ? "1" : "0");
                 Check(contains(("PREFS_MENU_VALUE_" + std::to_string(type) + ":" + expected).c_str()), "selected prefab value is committed and read by compiled script");
             }
@@ -267,10 +284,12 @@ int main(int argc, char** argv) {
             reconnect(); frame();
             Check(!contains("PREFS_UNEXPECTED_CALLBACK"), "reused player slot cannot receive the old connection's callback");
             run("sr plugins reload hello");
-            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 2; });
+            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 3; });
             run("sr_prefs_pending");
             run("sr plugins reload hello");
-            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 3; });
+            await([&] { frame(); return occurrences("PREFS_SCRIPT_OK") == 4; });
+            if (std::string(argv[10]) == "clientprefs_mysql")
+                await([&] { frame(); return occurrences("PREFS_NETWORK_OK") >= 9; });
             run("sr_prefs_final");
             run("sr plugins unload hello");
             await([&] { return stop(); });
@@ -279,6 +298,9 @@ int main(int argc, char** argv) {
                 script / "configs/extensions/source2root.clientprefs/databases.json");
             const auto values = storage()->Load(76561197960265851ULL);
             Check(values.at("music").text == "on-unload", "accepted preference write committed after script unload before host stop");
+            Check(storage()->Load(76561198000000001ULL).at("music").text == "offline-latest" &&
+                storage()->Load(76561198000000002ULL).at("music").text == "offline-on-unload",
+                "offline callbacks survive authentication loss and accepted writes survive script unload");
             Check(network_stop(), "preferences fixture teardown");
             std::cout << messages() << "Client preferences module lifecycle passed\n";
             return 0;

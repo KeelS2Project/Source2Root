@@ -11,8 +11,8 @@ template <typename Operation> static void Reject(Operation operation, const char
     try { operation(); } catch (const Error&) { failed = true; }
     Check(failed, message);
 }
-template <typename Predicate> static void Until(Service& service, Predicate done) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+template <typename Predicate> static void Until(Service& service, Predicate done, unsigned seconds = 5) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
     while (!done()) {
         service.Pump();
         if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("Timed out waiting for preferences jobs.");
@@ -202,6 +202,55 @@ static void Menus(const std::filesystem::path& root) {
     Reject([&] { BuildSettings(service, player, {}, 0); }, "disconnected identity cannot create settings menu");
 }
 
+static void Offline(const std::filesystem::path& root) {
+    const auto path = root / "prefs.sqlite";
+    const Identity player{0, 1, First};
+    Service service(path);
+    const auto music = service.Register(Public), rank = service.Register(Protected);
+    Until(service, [&] { return service.Pending() == 0; });
+    Store(path).Save(First, {{Public.name, {"old", 1}}, {Protected.name, {"unchanged", 2}}});
+    Check(service.IdentityPersisted(First + 99), "unknown local account has no pending accepted writes");
+    Reject([&] { service.SetIdentity(0, music, "invalid", 3); }, "offline account must be a valid individual Steam ID");
+    Reject([&] { service.SetIdentity(First, music, "invalid", -1); }, "offline negative timestamp rejected");
+    service.SetIdentity(First, music, "offline-first", 3);
+    service.SetIdentity(First, music, "offline-latest", 4);
+    Check(!service.IdentityPersisted(First), "offline acknowledgement is not committed persistence");
+    service.Sync({player});
+    Until(service, [&] { return service.Pending() == 0; });
+    Check(service.IdentityPersisted(First) && service.Get(player, music).text == "offline-latest" &&
+        service.Get(player, rank).text == "unchanged", "snapshot merges dirty offline overlay and preserves unrelated values");
+    service.SetIdentity(First, music, "online-by-id", 5);
+    Check(service.Get(player, music).text == "online-by-id", "identity setter updates this server's live cache");
+    Until(service, [&] { return service.IdentityPersisted(First); });
+    service.Sync({});
+    auto lock = std::make_shared<source2root::sqlite::Database>(path);
+    lock->Execute("BEGIN IMMEDIATE");
+    service.SetIdentity(Second, music, "offline-retry", 6);
+    Until(service, [&] { return service.Pending() == 0; });
+    Check(!service.IdentityPersisted(Second) && !service.IdentityError(Second).empty() && !service.CanStop(),
+        "failed offline write stays bounded, queryable and blocks unload");
+    lock->Execute("ROLLBACK"); lock.reset();
+    service.RetryWrites(); Until(service, [&] { return service.CanStop(); });
+    Check(service.IdentityPersisted(Second) && service.IdentityError(Second).empty() &&
+        Store(path).Load(Second).at(Public.name).text == "offline-retry", "offline retry survives initial load failure and account eviction");
+
+    std::atomic_bool failed{false};
+    Service bounded([&]() -> std::unique_ptr<source2root::prefs::Storage> {
+        if (failed) throw Error("Fixture storage unavailable.");
+        return std::make_unique<Store>(path);
+    });
+    Until(bounded, [&] { return bounded.Ready(); });
+    failed = true;
+    for (unsigned i = 0; i < MaxAccounts; ++i) bounded.SetIdentity(First + i, bounded.Find(Public.name), "retained", 7);
+    Reject([&] { bounded.SetIdentity(First + MaxAccounts, bounded.Find(Public.name), "overflow", 7); },
+        "offline accounts cannot grow beyond bounded retained cache");
+    Until(bounded, [&] { return bounded.Pending() == 0; });
+    Check(!bounded.CanStop(), "capacity pressure never silently discards accepted writes");
+    failed = false; bounded.RetryWrites(); Until(bounded, [&] { return bounded.CanStop(); }, 20);
+    Check(Store(path).Load(First).at(Public.name).text == "retained" &&
+        Store(path).Load(First + MaxAccounts - 1).at(Public.name).text == "retained", "all bounded offline accounts drain after repair");
+}
+
 int main(int argc, char** argv) {
     try {
         Check(argc == 3, "clientprefs_test storage|cache private-fixture");
@@ -211,6 +260,7 @@ int main(int argc, char** argv) {
         if (std::string(argv[1]) == "storage") StorageChecks(root);
         else if (std::string(argv[1]) == "cache") Cache(root);
         else if (std::string(argv[1]) == "menus") Menus(root);
+        else if (std::string(argv[1]) == "offline") Offline(root);
         else throw std::runtime_error("Unknown test mode.");
         std::cout << "Client preferences " << argv[1] << " checks passed\n";
         return 0;

@@ -30,7 +30,14 @@ if(SR_DATABASE_EXTENSION)
     if(SR_MYSQL_DRIVER)
         include(cmake/Source2RootMariaDB.cmake)
         sr_mariadb_dependency()
-        add_library(sr_mysql STATIC extensions/mysql/mysql_driver.cpp)
+        # One lifetime counter for every consumer of the shared Connector/C
+        # image. Static copies in separate extensions could tear it down while
+        # another module still has live connections or an initialization call.
+        add_library(sr_mysql SHARED extensions/mysql/mysql_driver.cpp)
+        set_target_properties(sr_mysql PROPERTIES OUTPUT_NAME "source2root_mysql" WINDOWS_EXPORT_ALL_SYMBOLS OFF)
+        target_compile_definitions(sr_mysql PRIVATE SR_MYSQL_BUILD=1)
+        set_property(TARGET sr_mysql APPEND PROPERTY BUILD_RPATH "$ORIGIN")
+        set_property(TARGET sr_mysql APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
         target_include_directories(sr_mysql PUBLIC extensions/mysql)
         target_link_libraries(sr_mysql PUBLIC sr_database PRIVATE libmariadb Threads::Threads)
         target_link_libraries(source2root_database PRIVATE sr_mysql)

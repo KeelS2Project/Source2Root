@@ -1,4 +1,21 @@
 #include <source2root_clientprefs>
+#if defined PREFS_NETWORK
+#include <source2root_database>
+void NetworkQuery()
+{
+    SQLQuery query = SQL_CreateQuery("SELECT SLEEP(0.05),73");
+    SQLRequest request = SQL_ExecuteAsync("acceptance", query, NetworkSaved);
+    SQL_CloseQuery(query);
+    if (!request) LogMessage("PREFS_FAILED_NETWORK_REQUEST");
+}
+public void NetworkSaved(SQLRequest request, any data, const char[] error)
+{
+    int value;
+    if (error[0] || !SQL_ResultInt(request, 0, 1, value) || value != 73) LogMessage("PREFS_FAILED_NETWORK_QUERY");
+    else LogMessage("PREFS_NETWORK_OK");
+    SQL_CloseRequest(request);
+}
+#endif
 
 PrefCookie cookies[3];
 Player client;
@@ -9,6 +26,9 @@ int menuType;
 
 public bool OnPluginStart()
 {
+#if defined PREFS_NETWORK
+    NetworkQuery();
+#endif
     cookies[0] = Prefs_RegisterCookie("music", "Music preference", Pref_Public);
     cookies[1] = Prefs_RegisterCookie("rank", "Server-managed rank", Pref_Protected);
     cookies[2] = Prefs_RegisterCookie("internal", "Internal value", Pref_Private);
@@ -25,7 +45,7 @@ public bool OnPluginStart()
     return RegisterCommand("sr_prefs_pending", "", Pending) && RegisterCommand("sr_prefs_final", "", FinalWrite) &&
         RegisterCommand("sr_prefs_menu", "", ShowSettings) && RegisterCommand("sr_prefs_type", "", SetType) &&
         RegisterCommand("sr_prefs_observe", "", Observe) && RegisterCommand("sr_prefs_drop", "", DropPrefab) &&
-        RegisterCommand("sr_prefs_close", "", CloseSettings);
+        RegisterCommand("sr_prefs_close", "", CloseSettings) && RegisterCommand("sr_prefs_offline", "", Offline);
 }
 
 public void CookieReady(PrefRequest request, Player player, any data, const char[] error)
@@ -89,6 +109,26 @@ public void FinalWrite(Player caller, const char[] arguments)
 {
     if (!Prefs_Set(client, cookies[0], "on-unload")) LogMessage("PREFS_FAILED_FINAL");
     Prefs_WhenSaved(client, Unexpected);
+    if (!Prefs_SetIdentity("76561198000000002", cookies[0], "offline-on-unload") ||
+        !Prefs_WhenIdentitySaved("76561198000000002", Unexpected)) LogMessage("PREFS_FAILED_OFFLINE_FINAL");
+}
+public void Offline(Player caller, const char[] arguments)
+{
+    if (Prefs_SetIdentity("display name", cookies[0], "invalid") ||
+        Prefs_SetIdentity("076561198000000001", cookies[0], "invalid") ||
+        Prefs_SetIdentity("76561198000000001x", cookies[0], "invalid") ||
+        !Prefs_SetIdentity("76561198000000001", cookies[0], "offline") ||
+        !Prefs_SetIdentity("76561198000000001", cookies[0], "offline-latest") ||
+        Prefs_IsIdentitySaved("76561198000000001") ||
+        !Prefs_WhenIdentitySaved("76561198000000001", OfflineSaved, 42)) LogMessage("PREFS_FAILED_OFFLINE");
+}
+public void OfflineSaved(PrefRequest request, Player player, any data, const char[] error)
+{
+    Prefs_CloseRequest(request);
+    char failure[256];
+    if (error[0] || player != NoPlayer || data != 42 || !Prefs_IsIdentitySaved("76561198000000001") ||
+        !Prefs_IdentityError("76561198000000001", failure, sizeof(failure)) || failure[0]) LogMessage("PREFS_FAILED_OFFLINE_SAVE");
+    else LogMessage("PREFS_OFFLINE_SAVED");
 }
 public void Unexpected(PrefRequest request, Player player, any data, const char[] error)
 {
@@ -119,6 +159,9 @@ public void DropPrefab(Player caller, const char[] arguments)
 }
 public void Observe(Player caller, const char[] arguments)
 {
+#if defined PREFS_NETWORK
+    NetworkQuery();
+#endif
     Prefs_WhenSaved(client, Observed, menuType);
 }
 public void Observed(PrefRequest request, Player player, any data, const char[] error)

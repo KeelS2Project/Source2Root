@@ -1,6 +1,7 @@
 #include "service.h"
 #include "menu.h"
 #include <source2root/extension.hpp>
+#include <charconv>
 
 namespace {
 using namespace keels2::authoring;
@@ -30,13 +31,14 @@ public:
 private:
     static constexpr unsigned CookieType = 1, RequestType = 2, PrefabType = 3, MenuType = 4;
     using CookieRef = std::shared_ptr<prefs::Cookie>;
-    enum class WaitFor { Catalog, Cookie, Cache, Save };
+    enum class WaitFor { Catalog, Cookie, Cache, Save, IdentitySave };
     struct Request {
         ClientPreferences* extension = nullptr;
         SrCallback callback = 0;
         WaitFor kind = WaitFor::Catalog;
         CookieRef cookie;
         prefs::Identity player;
+        std::uint64_t identity = 0;
         std::int32_t handle = 0, player_handle = 0, data = 0;
         bool done = false;
         ~Request() { if (extension && callback) extension->CancelCallback(callback); }
@@ -87,6 +89,10 @@ private:
             && RegisterNative("Prefs_CloseRequest", 1, &ClientPreferences::CloseRequest)
             && RegisterNative("Prefs_Retry", 1, &ClientPreferences::Retry)
             && RegisterNative("Prefs_Refresh", 1, &ClientPreferences::Refresh)
+            && RegisterNative("Prefs_SetIdentity", 3, &ClientPreferences::SetIdentity)
+            && RegisterNative("Prefs_IsIdentitySaved", 1, &ClientPreferences::IsIdentitySaved)
+            && RegisterNative("Prefs_IdentityError", 3, &ClientPreferences::IdentityError)
+            && RegisterNative("Prefs_WhenIdentitySaved", 3, &ClientPreferences::WhenIdentitySaved)
             && RegisterNative("Prefs_UserCookieCount", 0, &ClientPreferences::UserCookieCount)
             && RegisterNative("Prefs_UserCookieName", 3, &ClientPreferences::UserCookieName)
             && RegisterNative("Prefs_UserSet", 3, &ClientPreferences::UserSet)
@@ -173,6 +179,25 @@ private:
     std::int32_t Set(NativeCall& call) {
         return Invoke(call, [&] { service_->Set(Player(call), Cookie(call, 2), call.String(3), Now()); return 1; });
     }
+    static std::uint64_t Account(NativeCall& call) {
+        const auto text = call.String(1);
+        std::uint64_t id = 0;
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), id);
+        if (text.empty() || text.front() == '0' || parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+            throw prefs::Error("Client preferences identity must be a decimal Steam64 account.");
+        prefs::ValidateAccount(id);
+        return id;
+    }
+    std::int32_t SetIdentity(NativeCall& call) {
+        return Invoke(call, [&] { service_->SetIdentity(Account(call), Cookie(call, 2), call.String(3), Now()); return 1; });
+    }
+    std::int32_t IsIdentitySaved(NativeCall& call) {
+        return Invoke(call, [&] { return service_->IdentityPersisted(Account(call)) ? 1 : 0; });
+    }
+    std::int32_t IdentityError(NativeCall& call) {
+        call.Output(2, call.Int(3), "");
+        return Invoke(call, [&] { call.Output(2, call.Int(3), service_->IdentityError(Account(call))); return 1; });
+    }
     std::int32_t GetTime(NativeCall& call) {
         call.Output(3, call.Int(4), "");
         return Invoke(call, [&] { call.Output(3, call.Int(4), std::to_string(service_->Get(Player(call), Cookie(call, 2)).updated)); return 1; });
@@ -189,6 +214,7 @@ private:
             request->extension = this;
             request->kind = kind;
             if (kind == WaitFor::Cookie) request->cookie = Cookie(call);
+            if (kind == WaitFor::IdentitySave) request->identity = Account(call);
             if (kind == WaitFor::Cache || kind == WaitFor::Save) { request->player = Player(call); request->player_handle = call.Int(1); }
             const auto callback_index = kind == WaitFor::Catalog ? 1u : 2u;
             request->data = call.Int(callback_index + 1);
@@ -202,12 +228,16 @@ private:
     std::int32_t WhenCookieReady(NativeCall& call) { return Wait(call, WaitFor::Cookie); }
     std::int32_t WhenCached(NativeCall& call) { return Wait(call, WaitFor::Cache); }
     std::int32_t WhenSaved(NativeCall& call) { return Wait(call, WaitFor::Save); }
+    std::int32_t WhenIdentitySaved(NativeCall& call) { return Wait(call, WaitFor::IdentitySave); }
     std::int32_t CloseRequest(NativeCall& call) { call.Close(call.Int(1), RequestType); return 1; }
     void Complete(Request& request) {
         bool ready = false;
         std::string error;
         if (request.kind == WaitFor::Catalog) { ready = service_->Ready(); error = service_->ErrorText(); }
         else if (request.kind == WaitFor::Cookie) { ready = request.cookie->state == prefs::State::Ready; error = request.cookie->error; }
+        else if (request.kind == WaitFor::IdentitySave) {
+            ready = service_->IdentityPersisted(request.identity); error = service_->IdentityError(request.identity);
+        }
         else {
             if (std::find(players_.begin(), players_.end(), request.player) == players_.end()) {
                 CancelCallback(request.callback); request.done = true; return;

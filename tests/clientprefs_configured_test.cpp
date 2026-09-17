@@ -125,6 +125,10 @@ static void NetworkChecks(const std::filesystem::path& root, const std::filesyst
         a.RetryWrites(); Until(a, [&] { return a.CanStop(); });
         Check(storage()->Load(First).at("music").text == "survives-offline-failure", "repaired credentials are reread and dirty offline writes commit");
         b.Sync({}); Until(b, [&] { return b.CanStop(); });
+        a.SetIdentity(First + 1, a.Find("music"), "shared-offline", 14);
+        a.SetIdentity(First + 1, a.Find("music"), "shared-offline-latest", 15);
+        Until(a, [&] { return a.IdentityPersisted(First + 1); });
+        Check(storage()->Load(First + 1).at("music").text == "shared-offline-latest", "offline account updates commit through shared SQL");
     }
     // Fill all but one catalog slot, then race two independent registrations.
     {

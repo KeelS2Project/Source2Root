@@ -41,6 +41,9 @@ public:
     std::string ErrorText(const Identity& player) const;
     Value Get(const Identity& player, const std::shared_ptr<Cookie>& cookie) const;
     void Set(const Identity& player, const std::shared_ptr<Cookie>& cookie, const std::string& text, std::int64_t now);
+    void SetIdentity(std::uint64_t id, const std::shared_ptr<Cookie>& cookie, const std::string& text, std::int64_t now);
+    bool IdentityPersisted(std::uint64_t id) const;
+    std::string IdentityError(std::uint64_t id) const;
     void UserSet(const Identity& player, const std::string& name, const std::string& text, std::int64_t now);
     bool Persisted(const Identity& player) const;
     void RetryLoad(const Identity& player);
@@ -55,7 +58,7 @@ private:
         Values values, dirty;
         std::uint64_t revision = 0;
         bool loading = false, saving = false, write_failed = false;
-        std::string error;
+        std::string error, write_error;
     };
     struct Task { std::unique_ptr<WorkQueue::Ticket> ticket; bool done = false; };
     const std::thread::id owner_ = std::this_thread::get_id();
@@ -72,6 +75,8 @@ private:
     void CheckCookie(const std::shared_ptr<Cookie>& cookie) const;
     void Load(std::uint64_t id, const std::shared_ptr<Account>& account);
     void Save(std::uint64_t id, const std::shared_ptr<Account>& account);
+    void Write(std::uint64_t id, const std::shared_ptr<Account>& account, const std::shared_ptr<Cookie>& cookie,
+        const std::string& text, std::int64_t now);
     void Evict();
     void Thread() const;
     void LoadCatalog();
