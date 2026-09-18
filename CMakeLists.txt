@@ -124,7 +124,7 @@ function(sr_compile_script name source)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/scripts"
         COMMAND "${SR_SPCOMP}" "${source}" -i scripting/include -i plugins/include -o "${CMAKE_BINARY_DIR}/scripts/${name}.smx"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc scripting/include/source2root_clientprefs.inc scripting/include/source2root_geoip.inc scripting/include/source2root_regex.inc scripting/include/source2root_http.inc scripting/include/source2root_sdktools.inc scripting/include/source2root_cstrike.inc scripting/include/source2root_dhooks.inc plugins/include/admin_shared.inc)
+        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc scripting/include/source2root_clientprefs.inc scripting/include/source2root_geoip.inc scripting/include/source2root_regex.inc scripting/include/source2root_http.inc scripting/include/source2root_sdktools.inc scripting/include/source2root_cstrike.inc scripting/include/source2root_dhooks.inc scripting/include/source2root_sdkcall.inc plugins/include/admin_shared.inc)
     add_custom_target(script_${name} ALL DEPENDS "${CMAKE_BINARY_DIR}/scripts/${name}.smx")
 endfunction()
 sr_compile_script(player_status examples/player_status/player_status.sp)
@@ -140,6 +140,7 @@ sr_compile_script(http_example examples/http/http.sp)
 sr_compile_script(entities_example examples/entities/entities.sp)
 sr_compile_script(cstrike_example examples/cstrike/cstrike.sp)
 sr_compile_script(dhooks_example examples/dhooks/dhooks.sp)
+sr_compile_script(sdkcall_example examples/sdkcall/sdkcall.sp)
 sr_compile_script(admin plugins/admin/admin.sp)
 sr_compile_script(player_actions plugins/player_actions/player_actions.sp)
 sr_compile_script(moderation plugins/moderation/moderation.sp)
@@ -153,6 +154,11 @@ if(BUILD_TESTING)
         add_test(NAME dhooks_backend COMMAND sr_dhooks_test "${CMAKE_BINARY_DIR}/test-fixtures/dhooks-backend")
         set_tests_properties(dhooks_backend PROPERTIES TIMEOUT 15)
         sr_compile_script(dhooks tests/scripts/dhooks.sp)
+        sr_compile_script(sdkcall tests/scripts/sdkcall.sp)
+        add_executable(sr_sdkcall_test tests/sdkcall_test.cpp)
+        target_link_libraries(sr_sdkcall_test PRIVATE sr_dhooks Threads::Threads)
+        add_test(NAME sdkcall_backend COMMAND sr_sdkcall_test)
+        set_tests_properties(sdkcall_backend PROPERTIES TIMEOUT 15)
     endif()
     if(SR_COUNTERSTRIKE_EXTENSION)
         sr_compile_script(cstrike tests/scripts/cstrike.sp)
@@ -386,6 +392,12 @@ if(BUILD_TESTING)
                 "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/dhooks.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
                 "${CMAKE_BINARY_DIR}/test-fixtures/dhooks-module" "dhooks" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(dhooks_native_module PROPERTIES TIMEOUT 30)
+            add_test(NAME sdkcall_native_module COMMAND sr_module_integration
+                "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
+                $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_dhooks>
+                "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/sdkcall.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+                "${CMAKE_BINARY_DIR}/test-fixtures/sdkcall-module" "sdkcall" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
+            set_tests_properties(sdkcall_native_module PROPERTIES TIMEOUT 30)
         endif()
         if(SR_HTTP_EXTENSION)
             add_test(NAME http_native_module COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/http_fixture.py"

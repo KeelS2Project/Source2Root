@@ -17,7 +17,7 @@ public:
         catch (const std::exception& error) { LogError("Hook cleanup: {}",error.what()); }
     }
 private:
-    static constexpr unsigned TargetType = 1, HookType = 2;
+    static constexpr unsigned TargetType = 1, HookType = 2, CallType = 3;
     struct Window { std::int32_t id; std::uint64_t owner; dh::Frame* frame; };
     std::shared_ptr<dh::Service> service_;
     std::vector<Window> frames_;
@@ -30,8 +30,10 @@ private:
         return *api;
     }
     bool OnExtensionStart() override {
+        const void* calls = nullptr;
+        if (HostContext().QueryService(KEELCALL_SERVICE_NAME,KEELCALL_API_VERSION,&calls) != KEEL_RESULT_OK) calls = nullptr;
         service_ = std::make_shared<dh::Service>(HostContext().PluginHandle(),Require<KeelHookApi>(KEELHOOK_SERVICE_NAME,KEELHOOK_API_VERSION),
-            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME,KEELS2_NATIVE_RUNTIME_API_VERSION));
+            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME,KEELS2_NATIVE_RUNTIME_API_VERSION),static_cast<const KeelCallApi*>(calls));
         return RegisterNative("DHook_Open",1,&DHooks::Open)
             && RegisterNative("DHook_CloseTarget",1,&DHooks::CloseTarget)
             && RegisterNative("DHook_Add",5,&DHooks::Add)
@@ -51,7 +53,23 @@ private:
             && RegisterNative("DHook_SetFloat",3,&DHooks::SetNumber)
             && RegisterNative("DHook_SetFloatText",3,&DHooks::SetNumberText)
             && RegisterNative("DHook_SetNull",2,&DHooks::SetNull)
-            && RegisterNative("DHook_CopyValue",3,&DHooks::Copy);
+            && RegisterNative("DHook_CopyValue",3,&DHooks::Copy)
+            && RegisterNative("SDKCall_Prepare",1,&DHooks::PrepareCall)
+            && RegisterNative("SDKCall_Close",1,&DHooks::CloseCall)
+            && RegisterNative("SDKCall_Reset",1,&DHooks::ResetCall)
+            && RegisterNative("SDKCall_Execute",2,&DHooks::ExecuteCall)
+            && RegisterNative("SDKCall_ArgumentCount",1,&DHooks::CallCount)
+            && RegisterNative("SDKCall_ValueType",2,&DHooks::CallTypeAt)
+            && RegisterNative("SDKCall_GetInt",3,&DHooks::CallInteger)
+            && RegisterNative("SDKCall_GetIntegerText",4,&DHooks::CallIntegerText)
+            && RegisterNative("SDKCall_GetFloat",3,&DHooks::CallNumber)
+            && RegisterNative("SDKCall_GetFloatText",4,&DHooks::CallNumberText)
+            && RegisterNative("SDKCall_IsNull",3,&DHooks::CallIsNull)
+            && RegisterNative("SDKCall_SetInt",3,&DHooks::CallSetInteger)
+            && RegisterNative("SDKCall_SetIntegerText",3,&DHooks::CallSetIntegerText)
+            && RegisterNative("SDKCall_SetFloat",3,&DHooks::CallSetNumber)
+            && RegisterNative("SDKCall_SetFloatText",3,&DHooks::CallSetNumberText)
+            && RegisterNative("SDKCall_SetNull",2,&DHooks::CallSetNull);
     }
     bool PrepareExtensionUnload() override {
         if (!service_) return true;
@@ -138,6 +156,35 @@ private:
     std::int32_t SetNumberText(NativeCall& call) { return Invoke(call,[&] { Frame(call).SetNumberText(call.Int(2),call.String(3)); return 1; }); }
     std::int32_t SetNull(NativeCall& call) { return Invoke(call,[&] { Frame(call).SetNull(call.Int(2)); return 1; }); }
     std::int32_t Copy(NativeCall& call) { return Invoke(call,[&] { Frame(call).Copy(call.Int(2),call.Int(3)); return 1; }); }
+    static dh::Call& Prepared(NativeCall& call) { return call.Resource<dh::Call>(call.Int(1),CallType); }
+    std::int32_t PrepareCall(NativeCall& call) {
+        return Invoke(call,[&] { return call.Own(CallType,service_->Prepare(call.Resource<dh::Target>(call.Int(1),TargetType))); });
+    }
+    std::int32_t CloseCall(NativeCall& call) { call.Close(call.Int(1),CallType); return 1; }
+    std::int32_t ResetCall(NativeCall& call) { return Invoke(call,[&] { Prepared(call).Reset(); return 1; }); }
+    std::int32_t ExecuteCall(NativeCall& call) { return Invoke(call,[&] { Prepared(call).Execute(call.Int(2)); return 1; }); }
+    std::int32_t CallCount(NativeCall& call) { return static_cast<std::int32_t>(Prepared(call).Count()); }
+    std::int32_t CallTypeAt(NativeCall& call) { return Invoke(call,[&] { return static_cast<std::int32_t>(Prepared(call).Type(call.Int(2))); }); }
+    std::int32_t CallInteger(NativeCall& call) {
+        call.OutputCell(3,0); return Invoke(call,[&] { call.OutputCell(3,Prepared(call).Read(call.Int(2)).Integer(call.Int(2))); return 1; });
+    }
+    std::int32_t CallIntegerText(NativeCall& call) {
+        call.Output(3,call.Int(4),""); return Invoke(call,[&] { call.Output(3,call.Int(4),Prepared(call).Read(call.Int(2)).IntegerText(call.Int(2))); return 1; });
+    }
+    std::int32_t CallNumber(NativeCall& call) {
+        call.OutputCell(3,0); return Invoke(call,[&] { call.OutputCell(3,std::bit_cast<std::int32_t>(Prepared(call).Read(call.Int(2)).Number(call.Int(2)))); return 1; });
+    }
+    std::int32_t CallNumberText(NativeCall& call) {
+        call.Output(3,call.Int(4),""); return Invoke(call,[&] { call.Output(3,call.Int(4),Prepared(call).Read(call.Int(2)).NumberText(call.Int(2))); return 1; });
+    }
+    std::int32_t CallIsNull(NativeCall& call) {
+        call.OutputCell(3,0); return Invoke(call,[&] { call.OutputCell(3,Prepared(call).Read(call.Int(2)).IsNull(call.Int(2))); return 1; });
+    }
+    std::int32_t CallSetInteger(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetInteger(call.Int(2),call.Int(3)); return 1; }); }
+    std::int32_t CallSetIntegerText(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetIntegerText(call.Int(2),call.String(3)); return 1; }); }
+    std::int32_t CallSetNumber(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNumber(call.Int(2),call.Float(3)); return 1; }); }
+    std::int32_t CallSetNumberText(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNumberText(call.Int(2),call.String(3)); return 1; }); }
+    std::int32_t CallSetNull(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNull(call.Int(2)); return 1; }); }
 };
 }
 KEELS2_PLUGIN(DHooks)

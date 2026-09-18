@@ -62,6 +62,12 @@ void WriteNumber(KeelHookValue& value, double number) {
     } else throw Error("Hook value is not a float.");
 }
 }
+Frame::Frame(const Definition& definition) : phase_(KH_PHASE_PRE), flags_(0), result_{} {
+    Validate(definition);
+    result_.type = definition.result;
+    arguments_.resize(definition.arguments.size());
+    for (unsigned i = 0; i < arguments_.size(); ++i) arguments_[i].type = definition.arguments[i];
+}
 Frame::Frame(KeelHookFrame& frame, const Definition& definition) : phase_(frame.phase), flags_(frame.flags), result_(frame.result) {
     if (frame.size != sizeof(frame) || (frame.phase != KH_PHASE_PRE && frame.phase != KH_PHASE_POST) ||
         frame.argument_count != definition.arguments.size() || (frame.argument_count && !frame.arguments) ||

@@ -78,7 +78,7 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
             throw Error("Unsupported hook configuration schema.");
         if (!json.at("targets").contains(name)) throw Error("Hook target was not found.");
         const auto& target = json.at("targets").at(name);
-        Keys(target,{"allow_plugins","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments"});
+        Keys(target,{"allow_plugins","allow_calls","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments"});
         const auto& allowed = target.at("allow_plugins");
         if (!allowed.is_array() || allowed.empty() || allowed.size() > 128) throw Error("Hook target requires a plugin allow list.");
         bool permitted = false;
@@ -101,6 +101,8 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
         if (occurrence < 0 || occurrence > UINT32_MAX) throw Error("Hook pattern occurrence is out of range.");
         result.occurrence = static_cast<unsigned>(occurrence);
         if (target.contains("method") && !target.at("method").is_boolean()) throw Error("Hook method flag must be boolean.");
+        if (target.contains("allow_calls") && !target.at("allow_calls").is_boolean()) throw Error("Hook direct-call flag must be boolean.");
+        result.allow_calls = target.value("allow_calls",false);
         result.method = target.value("method",false); result.result = Type(target.at("return"));
         const auto& arguments = target.at("arguments");
         if (!arguments.is_array() || arguments.size() > KEELHOOK_MAX_ARGUMENTS) throw Error("Hook arguments require at most32 scalar types.");

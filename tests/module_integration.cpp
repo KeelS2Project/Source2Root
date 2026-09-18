@@ -107,10 +107,11 @@ int main(int argc, char** argv) {
         Copy(argv[8], script / "plugins/hello/plugin.json");
         std::filesystem::remove(script / "logs/source2root.log");
         std::filesystem::create_directories(script / "configs");
-        if (argc == 12 && std::string(argv[10]) == "dhooks") {
+        if (argc == 12 && (std::string(argv[10]) == "dhooks" || std::string(argv[10]) == "sdkcall")) {
             const auto directory = script / "configs/extensions/source2root.dhooks";
             std::filesystem::create_directories(directory);
-            std::ofstream(directory / "targets.json") << R"({"schema":1,"targets":{"scalar":{"allow_plugins":["hello"],"source":"symbol","module":")"
+            std::ofstream(directory / "targets.json") << R"({"schema":1,"targets":{"scalar":{"allow_calls":true,"allow_plugins":["hello"],"source":"symbol","module":")"
+                << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]},"observe_only":{"allow_plugins":["hello"],"source":"symbol","module":")"
                 << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]}}})";
         }
         if (argc == 12 && std::string(argv[10]) == "http") {
@@ -255,6 +256,31 @@ int main(int argc, char** argv) {
             Check(network_stop(),"persistent callback fixture teardown");
             Check(occurrences("PERSISTENT_CLEANUP_OK") == 3 && !contains("PERSISTENT_FAILED"),"persistent lifecycle has no failures");
             std::cout << messages() << "Persistent callback module lifecycle passed\n";
+            return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "sdkcall") {
+            auto scalar = adapter.Get<std::int32_t (*)(std::int32_t,float)>("SrFixtureHookScalar");
+            auto calls = adapter.Get<unsigned (*)()>("SrFixtureHookCalls");
+            auto original = adapter.Get<std::int32_t (*)()>("SrFixtureHookOriginal");
+            Check(contains("SDKCALL_READY"),"SDKCall module and script loaded with explicit call permission");
+            run("sr_sdkcall");
+            Check(contains("SDKCALL_CHECK_OK") && calls() == 2 && original() == 24,
+                "direct calls map arguments, bypass or run hooks and reject same-resource recursion");
+            run("keel plugins unload 2"); Check(contains("plugin unload is blocked"),"prepared call retains provider");
+            run("sr plugins pause hello"); Check(scalar(3,2) == 8,"paused script hook bypasses callback");
+            run("sr plugins resume hello");
+            run("sr_sdkcall_close"); Check(contains("SDKCALL_CLOSE_OK") && original() == 24,"call and hook can close inside callback");
+            frame(); Check(scalar(3,2) == 8,"deferred cleanup restores original");
+            run("sr_sdkcall_stale"); Check(contains("stale, foreign or wrong-type handle"),"closed call cannot be reused");
+            run("sr plugins reload hello"); frame();
+            const auto before = calls(); run("sr_sdkcall"); Check(calls() == before + 2,"new script generation owns fresh calls");
+            run("sr plugins unload hello"); frame(); Check(scalar(3,2) == 8,"script cleanup releases hook and prepared call");
+            run("keel plugins unload 2"); run("keel plugins load sr_example"); run("sr plugins load hello"); frame();
+            const auto reloaded = calls(); run("sr_sdkcall"); Check(calls() == reloaded + 2,"provider reload reacquires optional direct-call service");
+            run("sr plugins unload hello"); frame();
+            Check(!contains("SDKCALL_FAILED"),"SDKCall script reports no failure");
+            Check(stop(),"SDKCall host stops after owned resource cleanup"); Check(network_stop(),"SDKCall fixture teardown");
+            std::cout << messages() << "SDKCall native module lifecycle passed\n";
             return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "dhooks") {

@@ -27,7 +27,8 @@ struct Host {
     }
     static KeelResult Resolve(KeelPluginHandle owner, const KeelHookTargetSpec* spec, const KeelHookPrototype* prototype, KeelHookTargetHandle* handle) {
         Check(owner == 17 && spec->size == sizeof(*spec) && prototype->size == sizeof(*prototype) &&
-            spec->mechanism == KH_MECHANISM_DETOUR && prototype->calling_convention == KH_CALL_NATIVE,"host resolver envelope");
+            spec->mechanism == KH_MECHANISM_DETOUR && prototype->calling_convention == KH_CALL_NATIVE &&
+            prototype->fixed_argument_count == prototype->argument_count,"host resolver envelope");
         ++active->resolutions;
         const std::string symbol = spec->symbol ? spec->symbol : "";
         if (symbol == "Scalar") *handle = 9;
@@ -87,6 +88,12 @@ void Definitions(const std::filesystem::path& directory) {
     auto save = [&](const std::string& text) { std::ofstream(path) << text; };
     save(valid); const auto value = ReadDefinition(path,"scalar","first");
     Check(value.source == KH_TARGET_SYMBOL && value.arguments.size() == 2 && value.result == KH_VALUE_INT32,"typed config parses");
+    Check(!value.allow_calls,"direct calls default to disabled");
+    auto callable = valid; callable.insert(callable.find("\"allow_plugins\""),"\"allow_calls\":true,");
+    save(callable); Check(ReadDefinition(path,"scalar","first").allow_calls,"direct calls require explicit boolean permission");
+    auto wrong_flag = valid; wrong_flag.insert(wrong_flag.find("\"allow_plugins\""),"\"allow_calls\":1,");
+    save(wrong_flag); Reject([&] { ReadDefinition(path,"scalar","first"); },"numeric direct-call flag refused");
+    save(valid);
     Reject([&] { ReadDefinition(path,"scalar","second"); },"plugin allowlist enforced");
     Reject([&] { ReadDefinition(path,"missing","first"); },"missing target refused");
     for (const auto& text : {std::string(R"({"schema":1,"schema":1,"targets":{}})"),

@@ -1,5 +1,5 @@
 #pragma once
-#include <keels2/keelhook.h>
+#include <keels2/keelcall.h>
 #include <keels2/native_runtime.h>
 #include <filesystem>
 #include <functional>
@@ -12,7 +12,7 @@ namespace source2root::dhooks {
 class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
 struct Definition {
     unsigned source = 0, result = KH_VALUE_VOID;
-    bool method = false;
+    bool method = false, allow_calls = false;
     std::string module, symbol, pattern, profile;
     std::int64_t offset = 0;
     unsigned occurrence = 0;
@@ -21,6 +21,7 @@ struct Definition {
 Definition ReadDefinition(const std::filesystem::path& file, const std::string& name, const std::string& script);
 void Validate(const Definition& definition);
 class Service;
+class Call;
 struct TargetData;
 struct Registration;
 
@@ -46,6 +47,8 @@ public:
     void Copy(unsigned destination, unsigned source);
 private:
     friend class Service;
+    friend class Call;
+    explicit Frame(const Definition& definition);
     explicit Frame(KeelHookFrame& frame, const Definition& definition);
     void Commit(KeelHookFrame& frame, unsigned action) const;
     const KeelHookValue& Value(unsigned slot) const;
@@ -62,9 +65,35 @@ public:
     Target& operator=(const Target&) = delete;
 private:
     friend class Service;
-    Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data);
+    Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data, bool allow_calls);
     std::shared_ptr<Service> service_;
     std::shared_ptr<TargetData> data_;
+    bool allow_calls_;
+};
+
+// Reusable owned scalar call. All arguments must be explicitly initialized.
+// Internal shared state survives resource closure from a nested callback.
+class Call final {
+public:
+    Call(const Call&) = delete;
+    Call& operator=(const Call&) = delete;
+    ~Call();
+    unsigned Count() const;
+    unsigned Type(unsigned slot) const;
+    const Frame& Read(unsigned slot) const;
+    void SetInteger(unsigned slot, std::int32_t value);
+    void SetIntegerText(unsigned slot, const std::string& value);
+    void SetNumber(unsigned slot, float value);
+    void SetNumberText(unsigned slot, const std::string& value);
+    void SetNull(unsigned slot);
+    void Reset();
+    void Execute(unsigned flags);
+private:
+    friend class Service;
+    Call(std::shared_ptr<Service> service, std::shared_ptr<TargetData> target, const Definition& definition);
+    template<class Function> void Edit(unsigned slot, Function function);
+    struct State;
+    std::shared_ptr<State> state_;
 };
 class Hook final {
 public:
@@ -85,8 +114,10 @@ private:
 using Callback = std::function<int(Frame&)>;
 class Service final : public std::enable_shared_from_this<Service> {
 public:
-    Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime);
+    Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime,
+        const KeelCallApi* calls = nullptr);
     std::unique_ptr<Target> Open(const Definition& definition);
+    std::unique_ptr<Call> Prepare(const Target& target);
     std::unique_ptr<Hook> Attach(const Target& target, unsigned phases, std::int32_t priority,
         Callback callback, std::function<void()> retire);
     // Retry native removal/restoration failures while retaining callback data.
@@ -97,12 +128,15 @@ public:
     unsigned HookCount() const { return static_cast<unsigned>(registrations_.size()); }
 private:
     friend class Hook;
+    friend class Call;
+    void Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments, KeelHookValue& result);
     void Thread() const;
     void Close(Registration& registration) noexcept;
     static KeelHookAction Dispatch(KeelHookFrame* frame, void* raw) noexcept;
     KeelPluginHandle owner_;
     KeelHookApi hooks_;
     KeelNativeRuntimeApi runtime_;
+    KeelCallApi calls_{};
     // Native user_data must survive a resource destructor or facade close until
     // Collect successfully removes every native registration and target lease.
     std::shared_ptr<Service> keepalive_;

@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "native_call",
+  "name": "Configured scalar call",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "sdkcall.smx",
+  "enabled": false,
+  "dependencies": []
+}

@@ -23,8 +23,8 @@ struct Registration {
     unsigned active = 0;
     bool closing = false, enabled = true;
 };
-Target::Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data)
-    : service_(std::move(service)), data_(std::move(data)) {}
+Target::Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data, bool allow_calls)
+    : service_(std::move(service)), data_(std::move(data)), allow_calls_(allow_calls) {}
 Hook::Hook(std::shared_ptr<Service> service, std::shared_ptr<Registration> registration)
     : service_(std::move(service)), registration_(std::move(registration)) {}
 Hook::~Hook() { if (registration_) service_->Close(*registration_); }
@@ -36,12 +36,17 @@ void Hook::Enable(bool enabled) {
     Check(service_->hooks_.set_callback_enabled(service_->owner_,registration_->handle,enabled ? KEEL_TRUE : KEEL_FALSE),"Enable hook");
     registration_->enabled = enabled;
 }
-Service::Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime)
+Service::Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime, const KeelCallApi* calls)
     : owner_(owner), hooks_(hooks), runtime_(runtime) {
     if (!owner || hooks.size != sizeof(hooks) || hooks.api_version != KEELHOOK_API_VERSION ||
         !hooks.resolve_target || !hooks.release_target || !hooks.add_callback || !hooks.remove_callback || !hooks.set_callback_enabled ||
         runtime.size != sizeof(runtime) || runtime.api_version != KEELS2_NATIVE_RUNTIME_API_VERSION || !runtime.check_game_thread)
         throw Error("Incompatible hook or game-thread service.");
+    if (calls) {
+        if (calls->size != sizeof(*calls) || calls->api_version != KEELCALL_API_VERSION || !calls->invoke)
+            throw Error("Incompatible direct-call host service.");
+        calls_ = *calls;
+    }
     targets_.reserve(64); registrations_.reserve(256);
 }
 void Service::Thread() const { Check(runtime_.check_game_thread(owner_),"Hook operation"); }
@@ -49,13 +54,14 @@ std::unique_ptr<Target> Service::Open(const Definition& definition) {
     Thread(); Collect(); Validate(definition);
     if (targets_.size() >= 64) throw Error("Hook target limit (64) reached.");
     auto data = std::make_shared<TargetData>(); data->definition = definition;
-    auto result = std::unique_ptr<Target>(new Target(shared_from_this(),data));
+    auto result = std::unique_ptr<Target>(new Target(shared_from_this(),data,definition.allow_calls));
     const KeelHookTargetSpec spec{sizeof(spec),definition.source,KH_MECHANISM_DETOUR,
         definition.method ? KH_TARGET_METHOD : 0u,definition.module.empty() ? nullptr : definition.module.c_str(),
         definition.symbol.empty() ? nullptr : definition.symbol.c_str(),definition.pattern.empty() ? nullptr : definition.pattern.c_str(),
         definition.profile.empty() ? nullptr : definition.profile.c_str(),nullptr,definition.offset,definition.occurrence,0};
     const KeelHookPrototype prototype{sizeof(prototype),KH_CALL_NATIVE,definition.result,
-        static_cast<unsigned>(definition.arguments.size()),definition.arguments.data(),nullptr,nullptr,0,0,nullptr,nullptr};
+        static_cast<unsigned>(definition.arguments.size()),definition.arguments.data(),nullptr,nullptr,
+        static_cast<unsigned>(definition.arguments.size()),0,nullptr,nullptr};
     Check(hooks_.resolve_target(owner_,&spec,&prototype,&data->handle),"Resolve hook target");
     if (!data->handle) throw Error("Host returned an empty hook target.");
     // Host leases are a set of native providers, not a count of script opens.
@@ -69,6 +75,20 @@ std::unique_ptr<Target> Service::Open(const Definition& definition) {
     else targets_.push_back(std::move(data));
     keepalive_ = shared_from_this();
     return result;
+}
+std::unique_ptr<Call> Service::Prepare(const Target& target) {
+    Thread();
+    if (!calls_.invoke) throw Error("Direct-call host service is unavailable.");
+    if (target.service_.get() != this || !target.allow_calls_) throw Error("This configured target does not allow direct calls.");
+    if (target.data_->definition.method) throw Error("Script method calls require a future checked object-pointer adapter.");
+    return std::unique_ptr<Call>(new Call(shared_from_this(),target.data_,target.data_->definition));
+}
+void Service::Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments, KeelHookValue& result) {
+    Thread();
+    if (!calls_.invoke) throw Error("Direct-call host service is unavailable.");
+    Check(calls_.invoke(owner_,target.handle,flags,arguments.data(),static_cast<unsigned>(arguments.size()),&result),"Invoke configured target");
+    if (result.type != target.definition.result || result.reserved ||
+        (result.type == KH_VALUE_BOOL && result.scalar.boolean > 1)) throw Error("Invalid direct-call result from host.");
 }
 std::unique_ptr<Hook> Service::Attach(const Target& target, unsigned phases, std::int32_t priority,
     Callback callback, std::function<void()> retire) {
