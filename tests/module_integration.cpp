@@ -107,6 +107,12 @@ int main(int argc, char** argv) {
         Copy(argv[8], script / "plugins/hello/plugin.json");
         std::filesystem::remove(script / "logs/source2root.log");
         std::filesystem::create_directories(script / "configs");
+        if (argc == 12 && std::string(argv[10]) == "dhooks") {
+            const auto directory = script / "configs/extensions/source2root.dhooks";
+            std::filesystem::create_directories(directory);
+            std::ofstream(directory / "targets.json") << R"({"schema":1,"targets":{"scalar":{"allow_plugins":["hello"],"source":"symbol","module":")"
+                << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]}}})";
+        }
         if (argc == 12 && std::string(argv[10]) == "http") {
             const auto* url = std::getenv("SR_HTTP_URL"), *tls = std::getenv("SR_HTTP_TLS_URL");
             const auto* ca = std::getenv("SR_HTTP_CA"), *bad_ca = std::getenv("SR_HTTP_BAD_CA");
@@ -249,6 +255,50 @@ int main(int argc, char** argv) {
             Check(network_stop(),"persistent callback fixture teardown");
             Check(occurrences("PERSISTENT_CLEANUP_OK") == 3 && !contains("PERSISTENT_FAILED"),"persistent lifecycle has no failures");
             std::cout << messages() << "Persistent callback module lifecycle passed\n";
+            return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "dhooks") {
+            auto scalar = adapter.Get<std::int32_t (*)(std::int32_t,float)>("SrFixtureHookScalar");
+            auto calls = adapter.Get<unsigned (*)()>("SrFixtureHookCalls");
+            auto original = adapter.Get<std::int32_t (*)()>("SrFixtureHookOriginal");
+            const auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned found = 0; std::size_t offset = 0;
+                while ((offset = log.find(value,offset)) != std::string::npos) { ++found; offset += std::strlen(value); }
+                return found;
+            };
+            Check(occurrences("DHOOKS_READY") == 1,"DHooks module and compiled script initialized");
+            Check(scalar(3,2) == 90 && calls() == 1 && original() == 24,"pre changes original arguments and post overrides return");
+            run("sr_dhook_disable"); Check(scalar(3,2) == 8,"disabled hook bypasses script");
+            run("sr_dhook_enable"); run("sr plugins pause hello");
+            Check(scalar(3,2) == 8,"paused script cannot change native call");
+            run("sr plugins resume hello"); Check(scalar(3,2) == 90,"resume reuses hook callback");
+            const auto pre = occurrences("DHOOKS_PRE_OK"); std::int32_t worker_result = 0;
+            std::thread worker([&] { worker_result = scalar(3,2); }); worker.join();
+            Check(worker_result == 8 && occurrences("DHOOKS_PRE_OK") == pre,"engine worker does not enter SourcePawn");
+            run("keel plugins unload 2"); Check(contains("plugin unload is blocked"),"script keeps detour provider loaded");
+            run("sr plugins reload hello"); frame();
+            Check(occurrences("DHOOKS_READY") == 2 && scalar(3,2) == 90 && occurrences("DHOOKS_PRE_OK") == pre + 1,
+                "staged replacement shares target lease and retires old callback");
+            run("sr_dhook_mode"); const auto originals = calls();
+            Check(scalar(3,2) == 70 && calls() == originals,"pre supercede prevents original execution");
+            run("sr_dhook_mode");
+            Check(scalar(3,2) == 60 && calls() == originals && contains("DHOOKS_SELF_CLOSE_OK"),"self-removal retains callback until return");
+            frame(); Check(scalar(3,2) == 8,"last hook removal restores original");
+            run("sr_dhook_stale"); Check(contains("Hook frame is stale, inactive or belongs to another script."),"saved frame expires after callback");
+            run("sr plugins reload hello"); frame();
+            run("sr_dhook_mode"); run("sr_dhook_mode"); run("sr_dhook_mode");
+            Check(scalar(3,2) == 8 && original() == 8,"script fault discards staged argument mutation and calls original");
+            run("sr_dhook_faulted"); Check(contains("DHOOKS_FAULT_RETIRED_OK"),"fault invalidates token and hook");
+            frame(); run("sr plugins reload hello"); frame();
+            Check(scalar(3,2) == 90 && occurrences("DHOOKS_READY") == 4,"reload replaces failed hook generation");
+            run("sr plugins unload hello"); frame(); Check(scalar(3,2) == 8,"unload restores original before provider removal");
+            run("keel plugins unload 2"); run("keel plugins load sr_example");
+            run("sr plugins load hello"); frame();
+            Check(scalar(3,2) == 90 && occurrences("DHOOKS_READY") == 5,"native provider reload reacquires hook and callback services");
+            run("sr plugins unload hello"); frame();
+            Check(stop(),"DHooks host stops after deferred hook cleanup"); Check(network_stop(),"DHooks fixture teardown");
+            Check(!contains("DHOOKS_FAILED"),"DHooks fixture has no reported failures");
+            std::cout << messages() << "DHooks native module lifecycle passed\n";
             return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "http") {

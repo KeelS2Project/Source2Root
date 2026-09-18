@@ -109,6 +109,7 @@ include(cmake/Source2RootRegex.cmake)
 include(cmake/Source2RootHTTP.cmake)
 include(cmake/Source2RootSDKTools.cmake)
 include(cmake/Source2RootCounterStrike.cmake)
+include(cmake/Source2RootDHooks.cmake)
 if(WIN32)
     set(SR_SP_ARCH "windows-x86_64")
     set(SR_SP_LIBRARY "${SOURCEPAWN_BUILD}/libsourcepawn/${SR_SP_ARCH}/libsourcepawn.dll")
@@ -123,7 +124,7 @@ function(sr_compile_script name source)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/scripts"
         COMMAND "${SR_SPCOMP}" "${source}" -i scripting/include -i plugins/include -o "${CMAKE_BINARY_DIR}/scripts/${name}.smx"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc scripting/include/source2root_clientprefs.inc scripting/include/source2root_geoip.inc scripting/include/source2root_regex.inc scripting/include/source2root_http.inc scripting/include/source2root_sdktools.inc scripting/include/source2root_cstrike.inc plugins/include/admin_shared.inc)
+        DEPENDS "${source}" scripting/include/source2root.inc scripting/include/source2root_random.inc scripting/include/source2root_database.inc scripting/include/source2root_clientprefs.inc scripting/include/source2root_geoip.inc scripting/include/source2root_regex.inc scripting/include/source2root_http.inc scripting/include/source2root_sdktools.inc scripting/include/source2root_cstrike.inc scripting/include/source2root_dhooks.inc plugins/include/admin_shared.inc)
     add_custom_target(script_${name} ALL DEPENDS "${CMAKE_BINARY_DIR}/scripts/${name}.smx")
 endfunction()
 sr_compile_script(player_status examples/player_status/player_status.sp)
@@ -138,6 +139,7 @@ sr_compile_script(regex_example examples/regex/regex.sp)
 sr_compile_script(http_example examples/http/http.sp)
 sr_compile_script(entities_example examples/entities/entities.sp)
 sr_compile_script(cstrike_example examples/cstrike/cstrike.sp)
+sr_compile_script(dhooks_example examples/dhooks/dhooks.sp)
 sr_compile_script(admin plugins/admin/admin.sp)
 sr_compile_script(player_actions plugins/player_actions/player_actions.sp)
 sr_compile_script(moderation plugins/moderation/moderation.sp)
@@ -145,6 +147,13 @@ sr_compile_script(communications plugins/communications/communications.sp)
 sr_compile_script(server plugins/server/server.sp)
 if(BUILD_TESTING)
     find_package(Threads REQUIRED)
+    if(SR_DHOOKS_EXTENSION)
+        add_executable(sr_dhooks_test tests/dhooks_test.cpp)
+        target_link_libraries(sr_dhooks_test PRIVATE sr_dhooks Threads::Threads)
+        add_test(NAME dhooks_backend COMMAND sr_dhooks_test "${CMAKE_BINARY_DIR}/test-fixtures/dhooks-backend")
+        set_tests_properties(dhooks_backend PROPERTIES TIMEOUT 15)
+        sr_compile_script(dhooks tests/scripts/dhooks.sp)
+    endif()
     if(SR_COUNTERSTRIKE_EXTENSION)
         sr_compile_script(cstrike tests/scripts/cstrike.sp)
         add_executable(sr_cstrike_test tests/cstrike_test.cpp tests/cstrike_statistics.cpp tests/cstrike_rounds.cpp)
@@ -370,6 +379,14 @@ if(BUILD_TESTING)
             "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/persistent_module.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
             "${CMAKE_BINARY_DIR}/test-fixtures/persistent-module" "persistent" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
         set_tests_properties(persistent_callback_module PROPERTIES TIMEOUT 30)
+        if(SR_DHOOKS_EXTENSION)
+            add_test(NAME dhooks_native_module COMMAND sr_module_integration
+                "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
+                $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_dhooks>
+                "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/dhooks.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+                "${CMAKE_BINARY_DIR}/test-fixtures/dhooks-module" "dhooks" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
+            set_tests_properties(dhooks_native_module PROPERTIES TIMEOUT 30)
+        endif()
         if(SR_HTTP_EXTENSION)
             add_test(NAME http_native_module COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/http_fixture.py"
                 --root "${CMAKE_BINARY_DIR}/test-fixtures/http-module-server" -- $<TARGET_FILE:sr_module_integration>

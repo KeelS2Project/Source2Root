@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "targets": {
+    "example_scalar": {
+      "allow_plugins": ["hook_observer"],
+      "source": "profile",
+      "symbol": "replace_with_reviewed_profile_target",
+      "return": "int32",
+      "arguments": ["int32", "float32"]
+    }
+  }
+}

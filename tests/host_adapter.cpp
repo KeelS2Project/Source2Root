@@ -1,6 +1,7 @@
 #include <keels2/game_adapter.hpp>
 #include "host_fixture.h"
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -652,3 +653,19 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureStatisticsState(
     active->stat_read_caps = readable; active->stat_write_caps = writable; active->stat_cap_status = caps;
     active->stat_read_status = read; active->stat_write_status = write; active->stat_mutation = mutation;
 }
+
+namespace { std::atomic<unsigned> hook_calls{0}; std::atomic<std::int32_t> hook_original{0}; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+std::int32_t SrFixtureHookScalar(std::int32_t value, float real) {
+    ++hook_calls;
+    const auto result = value * 2 + static_cast<std::int32_t>(real);
+    hook_original = result;
+    return result;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureHookCalls() { return hook_calls; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT std::int32_t SrFixtureHookOriginal() { return hook_original; }

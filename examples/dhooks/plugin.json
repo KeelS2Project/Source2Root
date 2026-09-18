@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "hook_observer",
+  "name": "Configured hook observer",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "dhooks.smx",
+  "enabled": false,
+  "dependencies": []
+}
