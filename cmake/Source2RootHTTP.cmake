@@ -2,6 +2,8 @@ option(SR_HTTP_EXTENSION "Build asynchronous HTTP/Webternet extension" ON)
 if(SR_HTTP_EXTENSION)
     enable_language(C)
     include(FetchContent)
+    # Keep the selected imported target visible to the package inventory too.
+    find_package(ZLIB REQUIRED)
     function(sr_curl_dependency)
         file(READ "${CMAKE_SOURCE_DIR}/dependencies.lock.json" lock)
         string(JSON url GET "${lock}" curl url)
