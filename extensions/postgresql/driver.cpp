@@ -18,8 +18,15 @@
 #include <memory>
 #include <string_view>
 
+extern "C" void Source2RootPQReleaseTLSMethod(void);
+
 namespace source2root::postgresql {
 namespace {
+// Extension unload first drains the owned worker queue and destroys every
+// connection. This finalizer releases only our statically linked libpq state.
+struct TLSLifetime {
+    ~TLSLifetime() { Source2RootPQReleaseTLSMethod(); }
+} tls_lifetime;
 using Clock = std::chrono::steady_clock;
 using Connection = std::unique_ptr<PGconn, decltype(&PQfinish)>;
 using Result = std::unique_ptr<PGresult, decltype(&PQclear)>;

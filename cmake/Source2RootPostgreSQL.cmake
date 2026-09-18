@@ -19,6 +19,7 @@ if(SR_DATABASE_EXTENSION AND SR_POSTGRESQL_DRIVER)
         endif()
     endforeach()
     FetchContent_MakeAvailable(sr_meson sr_postgresql)
+    set(SR_PG_EFFECTIVE_SOURCE "${CMAKE_BINARY_DIR}/_deps/sr_postgresql-unloadable-src")
     set(SR_PG_ARGS --flex "${SR_PG_FLEX}" --bison "${SR_PG_BISON}")
     if(SR_SANITIZERS AND NOT MSVC)
         list(APPEND SR_PG_ARGS --sanitize)
@@ -35,13 +36,15 @@ if(SR_DATABASE_EXTENSION AND SR_POSTGRESQL_DRIVER)
         CONFIGURE_COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${sr_meson_SOURCE_DIR}"
             "CC=${CMAKE_C_COMPILER}" "CXX=${CMAKE_CXX_COMPILER}"
             "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/cmake/configure_postgresql.py"
-            "${sr_postgresql_SOURCE_DIR}" "${sr_postgresql_BINARY_DIR}" ${SR_PG_ARGS}
+            "${sr_postgresql_SOURCE_DIR}" "${sr_postgresql_BINARY_DIR}"
+            --staged-source "${SR_PG_EFFECTIVE_SOURCE}" ${SR_PG_ARGS}
         BUILD_COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${sr_meson_SOURCE_DIR}"
-            "${SR_NINJA}" -C "${sr_postgresql_BINARY_DIR}" -j 4
+            "${SR_NINJA}" -C "${sr_postgresql_BINARY_DIR}" -j 1
             src/interfaces/libpq/libpq.a src/common/libpgcommon_shlib.a src/port/libpgport_shlib.a
         INSTALL_COMMAND ""
         BUILD_BYPRODUCTS "${SR_PQ_ARCHIVE}" "${SR_PG_COMMON}" "${SR_PG_PORT}")
     ExternalProject_Add_StepDependencies(sr_libpq_build configure "${CMAKE_SOURCE_DIR}/cmake/configure_postgresql.py")
+    ExternalProject_Add_StepDependencies(sr_libpq_build configure "${CMAKE_SOURCE_DIR}/cmake/libpq_tls_cleanup.c")
     file(MAKE_DIRECTORY "${sr_postgresql_BINARY_DIR}/src/include")
     add_library(sr_libpq STATIC IMPORTED GLOBAL)
     set_target_properties(sr_libpq PROPERTIES IMPORTED_LOCATION "${SR_PQ_ARCHIVE}"
