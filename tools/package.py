@@ -171,7 +171,7 @@ def main():
     for name in ("admins.cfg", "admin_groups.cfg", "allowed_maps.txt", "map_menu.txt"):
         copy(ROOT / "configs" / name, runtime / "addons/source2root/configs" / name)
     tree(output / "sdk", developer / "sdk")
-    for header in ("extension.h", "extension.hpp", "native.h", "native.hpp", "callbacks.h", "http.h", "work_queue.hpp"):
+    for header in ("extension.h", "extension.hpp", "native.h", "native.hpp", "callbacks.h", "consumers.h", "http.h", "work_queue.hpp"):
         copy(ROOT / "include/source2root" / header, developer / "sdk/include/source2root" / header)
     extension_catalog = package_extensions.assemble(extensions, build, args.configuration, optional, developer)
     copy(ROOT / "cmake/Source2RootConfig.cmake", developer / "sdk/lib/cmake/Source2Root/Source2RootConfig.cmake")

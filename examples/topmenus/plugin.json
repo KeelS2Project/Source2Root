@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "topmenus_example",
+  "name": "Shared Top Menu Example",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "topmenus.smx",
+  "source": "topmenus.sp",
+  "enabled": false,
+  "dependencies": []
+}

@@ -203,6 +203,48 @@ KeelResult Foundation::NativeConsumerStatus(KeelPluginHandle provider, std::uint
     return KEEL_RESULT_NOT_FOUND;
 }
 
+KeelResult Foundation::ConsumerPlayer(KeelPluginHandle provider, std::uint64_t owner,
+    const KeelPlayerConnection* connection, Cell* handle) {
+    if (handle) *handle = 0;
+    Thread();
+    if (!handle || !connection || connection->slot < 0 || connection->reserved || !connection->generation)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto status = NativeConsumerStatus(provider, owner);
+    if (status != KEEL_RESULT_OK) return status;
+    if (managing_) return KEEL_RESULT_BUSY;
+    Player player;
+    const auto result = host_.Lookup(connection->slot, player);
+    if (result != KEEL_RESULT_OK) return result;
+    if (player.connection != connection->generation) return KEEL_RESULT_NOT_FOUND;
+    for (const auto& [id, slot] : scripts_) for (auto* script : {slot.current.get(), slot.replacement.get()}) {
+        if (!script || script->owner != owner) continue;
+        try { *handle = PlayerHandle(*script, player); }
+        catch (const NativeError&) { return KEEL_RESULT_BUSY; }
+        return KEEL_RESULT_OK;
+    }
+    return KEEL_RESULT_NOT_FOUND;
+}
+
+KeelResult Foundation::ConsumerPermission(KeelPluginHandle provider, std::uint64_t owner,
+    const KeelPlayerConnection* connection, const char* permission, KeelBool* allowed) {
+    if (allowed) *allowed = KEEL_FALSE;
+    Thread();
+    if (!allowed || !connection || connection->slot < 0 || connection->reserved || !connection->generation || !permission)
+        return KEEL_RESULT_INVALID_ARGUMENT;
+    std::size_t size = 0;
+    while (size <= 96 && permission[size]) ++size;
+    if (size > 96 || !ValidPermission(std::string(permission, size))) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto status = NativeConsumerStatus(provider, owner);
+    if (status != KEEL_RESULT_OK) return status;
+    if (managing_) return KEEL_RESULT_BUSY;
+    Player player;
+    const auto result = host_.Lookup(connection->slot, player);
+    if (result != KEEL_RESULT_OK) return result;
+    if (player.connection != connection->generation) return KEEL_RESULT_NOT_FOUND;
+    *allowed = permissions_.Allows(player, permission) ? KEEL_TRUE : KEEL_FALSE;
+    return KEEL_RESULT_OK;
+}
+
 Cell Foundation::InvokeContextNative(Script& script, Provider& provider, const Arguments& arguments) {
     NativeInvocation invocation{*this, script, provider, arguments};
     const auto call = invocation.Api();

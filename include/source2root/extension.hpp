@@ -3,6 +3,7 @@
 #include <source2root/extension.h>
 #include <source2root/native.hpp>
 #include <source2root/callbacks.h>
+#include <source2root/consumers.h>
 #include <keels2/authoring.hpp>
 #include <keels2/services.hpp>
 #include <algorithm>
@@ -20,7 +21,7 @@ namespace source2root {
 class Extension : public keels2::Plugin {
 public:
     bool Load() final {
-        if (api_ || native_api_ || callback_api_ || publication_ || queried_ || native_queried_ || callback_queried_) return false;
+        if (api_ || native_api_ || callback_api_ || consumer_api_ || publication_ || queried_ || native_queried_ || callback_queried_ || consumer_queried_) return false;
         ready_ = false;
         bindings_.clear();
         try {
@@ -145,6 +146,18 @@ protected:
         if (!native_api_ || !native_api_->consumer_status) return KEEL_RESULT_NOT_READY;
         return native_api_->consumer_status(native_api_->context, HostContext().PluginHandle(), owner);
     }
+    KeelResult ConsumerPlayer(std::uint64_t owner, const KeelPlayerConnection& player, std::int32_t& handle) {
+        handle = 0;
+        const auto status = ConnectConsumers();
+        if (status != KEEL_RESULT_OK) return status;
+        return consumer_api_->player_handle(consumer_api_->context, HostContext().PluginHandle(), owner, &player, &handle);
+    }
+    KeelResult ConsumerPermission(std::uint64_t owner, const KeelPlayerConnection& player, const char* permission, KeelBool& allowed) {
+        allowed = KEEL_FALSE;
+        const auto status = ConnectConsumers();
+        if (status != KEEL_RESULT_OK) return status;
+        return consumer_api_->check_permission(consumer_api_->context, HostContext().PluginHandle(), owner, &player, permission, &allowed);
+    }
 
     template <typename Owner, typename... Arguments>
     bool RegisterNative(const char* name, std::int32_t (Owner::*callback)(Arguments...)) {
@@ -185,6 +198,20 @@ protected:
     }
 
 private:
+    KeelResult ConnectConsumers() {
+        if (!ready_) return KEEL_RESULT_NOT_READY;
+        if (consumer_api_) return KEEL_RESULT_OK;
+        if (consumer_queried_) return KEEL_RESULT_INCOMPATIBLE;
+        const void* raw = nullptr;
+        const auto status = HostContext().QueryService(SR_CONSUMER_SERVICE, SR_CONSUMER_API_VERSION, &raw);
+        if (status != KEEL_RESULT_OK) return status;
+        consumer_queried_ = true;
+        const auto* api = static_cast<const SrConsumerApi*>(raw);
+        if (!api || api->size != sizeof(*api) || api->api_version != SR_CONSUMER_API_VERSION ||
+            !api->player_handle || !api->check_permission) return KEEL_RESULT_INCOMPATIBLE;
+        consumer_api_ = api;
+        return KEEL_RESULT_OK;
+    }
     struct Binding {
         Extension* extension = nullptr;
         std::string name;
@@ -273,6 +300,11 @@ private:
             if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
             callback_queried_ = false;
         }
+        if (consumer_queried_) {
+            const auto result = services_.Release(SR_CONSUMER_SERVICE, SR_CONSUMER_API_VERSION);
+            if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
+            consumer_queried_ = false;
+        }
         if (queried_) {
             const auto result = services_.Release(SR_EXTENSION_SERVICE, SR_EXTENSION_API_VERSION);
             if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
@@ -282,6 +314,7 @@ private:
         api_ = nullptr;
         native_api_ = nullptr;
         callback_api_ = nullptr;
+        consumer_api_ = nullptr;
         bindings_.clear();
         return true;
     }
@@ -295,7 +328,9 @@ private:
     const SrExtensionApi* api_ = nullptr;
     const SrNativeApi* native_api_ = nullptr;
     const SrCallbackApi* callback_api_ = nullptr;
+    const SrConsumerApi* consumer_api_ = nullptr;
     bool callback_queried_ = false;
+    bool consumer_queried_ = false;
     KeelServiceHandle publication_ = 0;
     std::vector<std::unique_ptr<Binding>> bindings_;
 };

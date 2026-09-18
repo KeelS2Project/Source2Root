@@ -108,6 +108,10 @@ int main(int argc, char** argv) {
         Copy(argv[8], script / "plugins/hello/plugin.json");
         std::filesystem::remove(script / "logs/source2root.log");
         std::filesystem::create_directories(script / "configs");
+        if (argc == 12 && std::string(argv[10]) == "topmenus") {
+            Copy(std::filesystem::path(argv[7]).parent_path() / "topmenus_contributor.smx", script / "plugins/top_other/main.smx");
+            std::ofstream(script / "plugins/top_other/plugin.json") << R"({"schema":1,"id":"top_other","name":"Top menu contributor","author":"tests","version":"1.0.0","api":2,"entry":"main.smx","enabled":true,"dependencies":[]})";
+        }
         if (argc == 12 && (std::string(argv[10]) == "dhooks" || std::string(argv[10]) == "sdkcall")) {
             const auto directory = script / "configs/extensions/source2root.dhooks";
             std::filesystem::create_directories(directory);
@@ -222,6 +226,93 @@ int main(int argc, char** argv) {
                   "stock baseline must refuse platform before initialization");
             Check(stop(), "stock host stops after rejected module");
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
+            return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "topmenus") {
+            auto player_lookup = adapter.Get<void (*)(KeelResult)>("SrFixturePlayerLookup");
+            const auto occurrences = [&](const char* text) {
+                const std::string log = messages(); unsigned total = 0; std::size_t offset = 0;
+                while ((offset = log.find(text, offset)) != std::string::npos) { ++total; offset += std::strlen(text); }
+                return total;
+            };
+            auto press = [&](std::uint64_t button) {
+                input_state(0, 1, KEEL_RESULT_OK); frame();
+                input_state(button, 1, KEEL_RESULT_OK); frame();
+            };
+            Check(occurrences("TOP_PRIMARY_LOADED") == 1 && occurrences("TOP_CONTRIBUTOR_LOADED") == 1,
+                "independent scripts contribute to a shared menu");
+            run("sr_top_show");
+            Check(std::string(menu_text()).find("Shared tools") != std::string::npos &&
+                std::string(menu_text()).find("Player actions") != std::string::npos &&
+                std::string(menu_text()).find("Disabled action") != std::string::npos &&
+                std::string(menu_text()).find("Denied action") == std::string::npos &&
+                std::string(menu_text()).find("Hidden action") == std::string::npos, "core and callback access filter shared display");
+            press(KEELS2_BUTTON_USE);
+            Check(std::string(menu_text()).find("Contributed action") != std::string::npos &&
+                std::string(menu_text()).find("Local action") != std::string::npos, "category contains both plugins' entries");
+            press(KEELS2_BUTTON_USE);
+            Check(occurrences("TOP_OTHER_SELECTED") == 1 && !*menu_text(), "selection invokes contributor with its own player handle");
+            run("sr_top_show"); press(KEELS2_BUTTON_USE);
+            std::ofstream(script / "configs/admins.cfg") << "\"Admins\" {}";
+            run("sr_top_permissions"); frame();
+            Check(!*menu_text(), "revoking category permission closes the active submenu");
+            std::ofstream(script / "configs/admins.cfg") << permissions;
+            run("sr_top_permissions");
+            run("sr_top_show");
+            player_lookup(KEEL_RESULT_ENGINE_FAILURE); frame(); run("sr_top_close"); frame();
+            player_lookup(KEEL_RESULT_OK); frame();
+            Check(!*menu_text(), "failed renderer cleanup retains context through resource destruction and retries");
+            run("sr_top_show"); run("sr plugins pause hello"); frame();
+            Check(!*menu_text(), "pausing display owner closes the view");
+            run("sr plugins resume hello");
+            run("sr_top_show"); run("sr_top_title"); frame();
+            Check(std::string(menu_text()).find("Changed title") != std::string::npos, "title invalidation refreshes open display");
+            press(KEELS2_BUTTON_USE);
+            run("sr plugins pause top_other"); frame();
+            Check(std::string(menu_text()).find("Contributed action") == std::string::npos &&
+                std::string(menu_text()).find("Local action") != std::string::npos, "paused contributor disappears before selection");
+            press(KEELS2_BUTTON_USE);
+            Check(occurrences("TOP_LOCAL_SELECTED") == 1 && occurrences("TOP_OTHER_SELECTED") == 1, "remaining owner still selects normally");
+            run("sr plugins resume top_other"); run("sr_top_show"); press(KEELS2_BUTTON_USE);
+            run("sr plugins reload top_other"); frame();
+            Check(occurrences("TOP_CONTRIBUTOR_LOADED") == 2, "staged reload accepts matching contribution key");
+            press(KEELS2_BUTTON_USE);
+            Check(occurrences("TOP_OTHER_SELECTED") == 2, "reloaded generation owns the new callback");
+            run("sr_top_show"); press(KEELS2_BUTTON_USE);
+            reconnect(); frame();
+            run("sr_top_closed"); press(KEELS2_BUTTON_USE);
+            Check(occurrences("TOP_DISPLAY_CLOSED") == 1 && occurrences("TOP_OTHER_SELECTED") == 2,
+                "reused slot closes old connection's display without invoking a stale action");
+            run("sr_top_show"); press(KEELS2_BUTTON_USE);
+            run("sr plugins unload top_other"); frame();
+            run("sr_top_hide"); press(KEELS2_BUTTON_USE);
+            Check(occurrences("TOP_LOCAL_SELECTED") == 1, "dynamic access is rechecked before selection");
+            run("sr plugins reload hello");
+            run("sr_top_mutate"); frame();
+            Check(occurrences("TOP_MUTATION_REJECTED") == 1 && !*menu_text(), "access callback mutation rejects display atomically");
+            run("sr_top_show"); press(KEELS2_BUTTON_USE); run("sr_top_selfclose"); press(KEELS2_BUTTON_USE);
+            Check(occurrences("TOP_SELF_CLOSED") == 1 && std::string(menu_text()).find("Changed title") != std::string::npos,
+                "selection may remove itself and show another menu without stale context");
+            run("sr plugins load top_other"); run("sr_top_fault");
+            run("sr_top_show"); frame();
+            Check(!*menu_text(), "script fault retires contribution and discards an invalidated display");
+            run("sr_top_show");
+            Check(std::string(menu_text()).find("Player actions") == std::string::npos, "faulted callback cannot leave an active category");
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked"), "consumer resources retain native provider");
+            run("sr plugins unload top_other"); run("sr plugins unload hello"); frame();
+            Check(!*menu_text(), "script unload closes display before callback storage is reclaimed");
+            run("keel plugins unload 2"); run("keel plugins load sr_example");
+            run("sr plugins load hello"); run("sr plugins load top_other"); run("sr_top_show");
+            press(KEELS2_BUTTON_USE); press(KEELS2_BUTTON_USE);
+            Check(occurrences("TOP_OTHER_SELECTED") == 3, "provider reload reacquires consumer and callback services");
+            const bool stopped = stop();
+            Check(stopped || stop(), "top menu provider releases all services after script cleanup and unload retry");
+            Check(network_stop(), "top menu renderer fixture teardown");
+            Check(!contains("TOP_FAILED_CALLBACK_IDENTITY") && !contains("TOP_FAILED_CONTRIBUTOR_IDENTITY") &&
+                !contains("TOP_FAILED_REOPEN") && !contains("TOP_FAILED_MUTATION") && !contains("TOP_FAILED_TITLE") &&
+                !contains("TOP_FAILED_CLOSED") && !contains("TOP_FAILED_PERMISSIONS"), "all ownership and mutation assertions passed");
+            std::cout << messages() << "Shared top menu actual-host lifecycle passed\n";
             return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "persistent") {

@@ -11,6 +11,7 @@
 #include "runtime.h"
 #include <source2root/extension.h>
 #include <source2root/native.h>
+#include <source2root/consumers.h>
 
 #include <chrono>
 #include <map>
@@ -117,6 +118,10 @@ public:
         const SrCallbackArgument* arguments, std::uint32_t count, Cell* result);
     KeelResult NativePlayerSnapshot(SrPlayerIdentity* players, std::uint32_t capacity, std::uint32_t* count);
     KeelResult NativeConsumerStatus(KeelPluginHandle provider, std::uint64_t owner);
+    KeelResult ConsumerPlayer(KeelPluginHandle provider, std::uint64_t owner,
+        const KeelPlayerConnection* connection, Cell* handle);
+    KeelResult ConsumerPermission(KeelPluginHandle provider, std::uint64_t owner,
+        const KeelPlayerConnection* connection, const char* permission, KeelBool* allowed);
     KeelResult OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerConnection& player,
         const SrMenuSpec& spec, SrMenuSession& session);
     KeelResult CloseNativeMenu(KeelPluginHandle owner, SrMenuSession session);

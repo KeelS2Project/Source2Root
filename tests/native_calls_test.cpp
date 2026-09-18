@@ -157,10 +157,35 @@ int main(int argc, char** argv) {
         Check(probe.foreign_refusals == 1 && host.destroyed == 2, "foreign ownership and explicit close verified");
         Check(foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_OK &&
             foundation.NativeConsumerStatus(999, probe.first_owner) == KEEL_RESULT_INVALID_ARGUMENT, "consumer status verifies provider lease");
-        Check(foundation.Pause("first") && foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_BUSY &&
-            foundation.Resume("first"), "consumer status distinguishes paused and running generations");
+        KeelPlayerConnection connection{host.player.slot, 0, host.player.connection};
+        sr::Cell player_handle = 99;
+        KeelBool allowed = KEEL_TRUE;
+        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_OK &&
+            player_handle == probe.first_player, "consumer service reuses this script's player handle");
+        Check(foundation.ConsumerPlayer(999, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_INVALID_ARGUMENT &&
+            !player_handle, "foreign provider cannot create a consumer player handle");
+        Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_OK && allowed,
+            "public permission checks a current consumer connection");
+        Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "admin.root", &allowed) == KEEL_RESULT_OK && !allowed,
+            "consumer permissions use current core rules");
+        Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "bad..permission", &allowed) == KEEL_RESULT_INVALID_ARGUMENT && !allowed,
+            "consumer invalid permission clears output");
+        ++connection.generation;
+        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_NOT_FOUND && !player_handle &&
+            foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_NOT_FOUND && !allowed,
+            "consumer service rejects stale connections");
+        --connection.generation;
+        Check(foundation.Pause("first") && foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_BUSY,
+            "consumer status distinguishes paused and running generations");
+        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_BUSY && !player_handle &&
+            foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_BUSY && !allowed,
+            "paused consumers cannot acquire player context or permissions");
+        Check(foundation.Resume("first"), "resume consumer");
         Check(foundation.Reload("first"), "staged reload owns distinct resources");
         Check(foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_NOT_FOUND, "retired consumer generation never becomes active again");
+        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_NOT_FOUND && !player_handle &&
+            foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_NOT_FOUND && !allowed,
+            "old generations cannot recover consumer context after reload");
         Check(host.stopped == 1 && host.destroyed == 4, "retired script cleanup");
         Check(foundation.UnregisterNative(100, probe.registration) == KEEL_RESULT_BUSY, "retained providers refuse unload");
         Check(foundation.Unload("second"), "release second script before last-consumer failure");

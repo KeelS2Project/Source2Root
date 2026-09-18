@@ -74,6 +74,9 @@ public:
             callback_api_ = {sizeof(callback_api_),SR_CALLBACK_API_VERSION,this,&RetainCallback,&InvokeCallback,&CancelCallback};
             if (services_.Publish(SR_CALLBACK_SERVICE,SR_CALLBACK_API_VERSION,&callback_api_,callback_publication_) != KEEL_RESULT_OK)
                 throw std::runtime_error("could not publish persistent callback API");
+            consumer_api_ = {sizeof(consumer_api_), SR_CONSUMER_API_VERSION, this, &ConsumerPlayer, &ConsumerPermission};
+            if (services_.Publish(SR_CONSUMER_SERVICE, SR_CONSUMER_API_VERSION, &consumer_api_, consumer_publication_) != KEEL_RESULT_OK)
+                throw std::runtime_error("could not publish consumer player API");
             if (!CreateCommand("sr", "Source2Root management", &Source2Root::Manage) ||
                 !CreateCommand("sr_menu", "Menu input: up/down/select/back [session]", &Source2Root::MenuCommand,
                     FCVAR_CLIENT_CAN_EXECUTE | FCVAR_GAMEDLL))
@@ -102,6 +105,11 @@ public:
     bool PrepareUnload() override {
         if (runtime_.CheckGameThread() != KEEL_RESULT_OK || !foundation_) return !foundation_;
         if (!foundation_->Shutdown()) return false;
+        if (consumer_publication_) {
+            const auto result = services_.Withdraw(consumer_publication_);
+            if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
+            consumer_publication_ = 0;
+        }
         if (callback_publication_) {
             const auto result = services_.Withdraw(callback_publication_);
             if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
@@ -434,6 +442,8 @@ private:
     SrExtensionApi api_{};
     SrNativeApi native_api_{};
     SrCallbackApi callback_api_{};
+    SrConsumerApi consumer_api_{};
+    KeelServiceHandle consumer_publication_ = 0;
     KeelServiceHandle callback_publication_ = 0;
     KeelServiceHandle native_publication_ = 0;
     KeelServiceHandle publication_ = 0;
@@ -730,6 +740,16 @@ private:
     }
     static KeelResult ConsumerStatus(void* context, KeelPluginHandle provider, std::uint64_t owner) {
         return Call(context, [&](auto& core) { return core.NativeConsumerStatus(provider, owner); }, true);
+    }
+    static KeelResult ConsumerPlayer(void* context, KeelPluginHandle provider, std::uint64_t owner,
+        const KeelPlayerConnection* player, std::int32_t* handle) {
+        if (handle) *handle = 0;
+        return Call(context, [&](auto& core) { return core.ConsumerPlayer(provider, owner, player, handle); });
+    }
+    static KeelResult ConsumerPermission(void* context, KeelPluginHandle provider, std::uint64_t owner,
+        const KeelPlayerConnection* player, const char* permission, KeelBool* allowed) {
+        if (allowed) *allowed = KEEL_FALSE;
+        return Call(context, [&](auto& core) { return core.ConsumerPermission(provider, owner, player, permission, allowed); });
     }
 };
 }
