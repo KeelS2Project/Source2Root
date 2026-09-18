@@ -5,6 +5,8 @@ DHook hook;
 SDKCall buffer_call;
 DHook buffer_hook;
 int buffer_mode;
+SDKCall entity_call;
+SDKCall pawn_call;
 int mode;
 int visits;
 public bool OnPluginStart()
@@ -22,6 +24,10 @@ public bool OnPluginStart()
     LogMessage("SDKCALL_READY");
     return RegisterCommand("sr_sdkcall", "", Check)
         && RegisterCommand("sr_sdkcall_buffers", "", CheckBuffers)
+        && RegisterCommand("sr_sdkcall_entities", "", CheckEntities)
+        && RegisterCommand("sr_sdkcall_entity_reconnect", "", EntityReconnect)
+        && RegisterCommand("sr_sdkcall_entity_epoch", "", EntityEpoch)
+        && RegisterCommand("sr_sdkcall_entity_close_active", "", EntityCloseActive)
         && RegisterCommand("sr_sdkcall_close", "", CloseDuringCall)
         && RegisterCommand("sr_sdkcall_stale", "", Stale);
 }
@@ -153,4 +159,70 @@ public DHookAction BufferIntercept(DHookFrame frame, DHookPhase phase, int data)
     SDKCall_Close(buffer_call); buffer_call = NoSDKCall;
     DHook_Close(buffer_hook); buffer_hook = NoDHook;
     return DHook_Continue;
+}
+
+bool InitializeEntity(SDKCall call)
+{
+    return SDKCall_SetInt(call, 2, 11) && SDKCall_SetString(call, 3, "hello", 8);
+}
+bool EntityResult(SDKCall call, int expected)
+{
+    int result; char text[8];
+    return SDKCall_GetInt(call, 0, result) && result == expected
+        && SDKCall_GetString(call, 3, text, sizeof(text)) && text[0] == 'c' && text[6] == 'd' && !text[7];
+}
+public void CheckEntities(Player player, const char[] arguments)
+{
+    DHookTarget target = DHook_Open("entity"), pawn = DHook_Open("pawn");
+    if (target == NoDHookTarget || pawn == NoDHookTarget)
+    { LogMessage("SDKCALL_FAILED entity targets"); return; }
+    entity_call = SDKCall_Prepare(target); pawn_call = SDKCall_Prepare(pawn);
+    DHook_CloseTarget(target); DHook_CloseTarget(pawn);
+    Player players[1]; bool is_null = true;
+    if (entity_call == NoSDKCall || pawn_call == NoSDKCall || GetPlayers(players, sizeof(players)) != 1
+        || SDKCall_SetNull(entity_call, 1) || !InitializeEntity(entity_call) || SDKCall_Execute(entity_call)
+        || !SDKCall_SetEntityReference(entity_call, 1, 0x12003)
+        || !SDKCall_IsNull(entity_call, 1, is_null) || is_null
+        || SDKCall_Execute(entity_call, SDKCALL_INVOKE_HOOKS)
+        || !SDKCall_Execute(entity_call) || !EntityResult(entity_call, 42)
+        || SDKCall_SetEntityReference(entity_call, 1, -1) || !EntityResult(entity_call, 42)
+        || !SDKCall_SetEntityReference(entity_call, 1, 0x23004) || !InitializeEntity(entity_call)
+        || SDKCall_Execute(entity_call)
+        || !SDKCall_SetPlayer(entity_call, 1, players[0]) || !SDKCall_Execute(entity_call) || !EntityResult(entity_call, 42)
+        || !SDKCall_SetPlayer(pawn_call, 1, players[0], true) || !InitializeEntity(pawn_call)
+        || !SDKCall_Execute(pawn_call) || !EntityResult(pawn_call, 58))
+    { LogMessage("SDKCALL_FAILED entity mapping"); return; }
+    LogMessage("SDKCALL_ENTITIES_OK");
+}
+public void EntityReconnect(Player player, const char[] arguments)
+{
+    Player players[1]; int result = 99;
+    if (SDKCall_Execute(entity_call) || SDKCall_Execute(pawn_call)
+        || SDKCall_GetInt(entity_call, 0, result) || result
+        || GetPlayers(players, sizeof(players)) != 1 || !SDKCall_SetPlayer(entity_call, 1, players[0])
+        || !InitializeEntity(entity_call) || !SDKCall_Execute(entity_call) || !EntityResult(entity_call, 42))
+    { LogMessage("SDKCALL_FAILED entity reconnect"); return; }
+    SDKCall_Close(pawn_call); pawn_call = NoSDKCall;
+    LogMessage("SDKCALL_ENTITY_RECONNECT_OK");
+}
+public void EntityEpoch(Player player, const char[] arguments)
+{
+    if (SDKCall_Execute(entity_call) || !SDKCall_SetEntityReference(entity_call, 1, 0x12003)
+        || !InitializeEntity(entity_call) || !SDKCall_Execute(entity_call) || !EntityResult(entity_call, 42)
+        || !SDKCall_Reset(entity_call) || SDKCall_Execute(entity_call)
+        || !SDKCall_SetEntityReference(entity_call, 1, 0x12003) || !InitializeEntity(entity_call))
+    { LogMessage("SDKCALL_FAILED entity epoch"); return; }
+    LogMessage("SDKCALL_ENTITY_EPOCH_OK");
+    if (!SDKCall_SetInt(entity_call, 2, 99) || !SDKCall_Execute(entity_call) || entity_call != NoSDKCall)
+        LogMessage("SDKCALL_FAILED entity self close");
+    else LogMessage("SDKCALL_ENTITY_CLOSE_OK");
+}
+public void EntityCloseActive(Player player, const char[] arguments)
+{
+    Player players[1]; bool is_null;
+    if (GetPlayers(players, sizeof(players)) != 1 || SDKCall_SetPlayer(entity_call, 1, players[0])
+        || SDKCall_SetEntityReference(entity_call, 1, 0x12003) || SDKCall_Reset(entity_call)
+        || SDKCall_Execute(entity_call) || SDKCall_IsNull(entity_call, 1, is_null))
+        LogMessage("SDKCALL_FAILED busy entity admitted");
+    SDKCall_Close(entity_call); entity_call = NoSDKCall;
 }

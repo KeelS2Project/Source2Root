@@ -6,6 +6,7 @@
 #include <thread>
 
 using namespace source2root::dhooks;
+void EntityCalls();
 namespace {
 void Check(bool value, const char* text) { if (!value) throw std::runtime_error(text); }
 template<class Function> void Reject(Function function, const char* text) {
@@ -198,6 +199,7 @@ int main() {
         Reject([&] { service->Prepare(*method_target); },"script method adapter not yet available");
         method_target.reset(); service->Collect();
         Buffers(host,service);
+        EntityCalls();
         std::cout << "SDKCall ownership, scalar and buffer preparation passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

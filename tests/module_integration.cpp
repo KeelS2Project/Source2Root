@@ -121,7 +121,9 @@ int main(int argc, char** argv) {
             std::ofstream(directory / "targets.json") << R"({"schema":1,"targets":{"scalar":{"allow_calls":true,"allow_plugins":["hello"],"source":"symbol","module":")"
                 << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]},"observe_only":{"allow_plugins":["hello"],"source":"symbol","module":")"
                 << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]},"buffers":{"allow_calls":true,"allow_plugins":["hello"],"source":"symbol","module":")"
-                << adapter_name << R"(","symbol":"SrFixtureHookBuffers","return":"int32","arguments":["pointer","uint32","pointer","int32","pointer"],"buffers":[{"argument":1,"kind":"string","capacity":32,"length_argument":2},{"argument":3,"kind":"int32","capacity":8,"length_argument":4},{"argument":5,"kind":"vector3"}]}}})";
+                << adapter_name << R"(","symbol":"SrFixtureHookBuffers","return":"int32","arguments":["pointer","uint32","pointer","int32","pointer"],"buffers":[{"argument":1,"kind":"string","capacity":32,"length_argument":2},{"argument":3,"kind":"int32","capacity":8,"length_argument":4},{"argument":5,"kind":"vector3"}]},"entity":{"allow_calls":true,"allow_plugins":["hello"],"source":"symbol","module":")"
+                << adapter_name << R"(","symbol":"SrFixtureEntityMethod","method":true,"return":"int32","arguments":["pointer","int32","pointer","uint32"],"entities":[{"argument":1,"class":"CCSPlayerController"}],"buffers":[{"argument":3,"kind":"string","capacity":16,"length_argument":4}]},"pawn":{"allow_calls":true,"allow_plugins":["hello"],"source":"symbol","module":")"
+                << adapter_name << R"(","symbol":"SrFixtureEntityMethod","method":true,"return":"int32","arguments":["pointer","int32","pointer","uint32"],"entities":[{"argument":1,"class":"CCSPlayerPawn"}],"buffers":[{"argument":3,"kind":"string","capacity":16,"length_argument":4}]}}})";
         }
         if (argc == 12 && std::string(argv[10]) == "http") {
             const auto* url = std::getenv("SR_HTTP_URL"), *tls = std::getenv("SR_HTTP_TLS_URL");
@@ -365,6 +367,15 @@ int main(int argc, char** argv) {
             run("sr_sdkcall_buffers");
             Check(contains("SDKCALL_BUFFERS_OK") && contains("SDKCALL_BUFFER_CLOSE_OK") && contains("SDKCALL_BUFFER_HOOK_BOUNDS_OK"),
                 "owned buffers map across native ABI, copy results and survive callback closure");
+            auto entity_calls = adapter.Get<unsigned (*)()>("SrFixtureEntityCalls");
+            auto entity_epoch = adapter.Get<void (*)()>("SrFixtureEntityEpoch");
+            run("sr_sdkcall_entities");
+            Check(contains("SDKCALL_ENTITIES_OK") && entity_calls() == 3,"checked controller/pawn methods and class mismatch");
+            reconnect(); run("sr_sdkcall_entity_reconnect");
+            Check(contains("SDKCALL_ENTITY_RECONNECT_OK") && entity_calls() == 4,"player reconnect refuses old call and supports fresh binding");
+            entity_epoch(); run("sr_sdkcall_entity_epoch");
+            Check(contains("SDKCALL_ENTITY_EPOCH_OK") && contains("SDKCALL_ENTITY_CLOSE_OK") && entity_calls() == 6,
+                "map epoch expires retained identity; nested script close preserves native call state");
             run("keel plugins unload 2"); Check(contains("plugin unload is blocked"),"prepared call retains provider");
             run("sr plugins pause hello"); Check(scalar(3,2) == 8,"paused script hook bypasses callback");
             run("sr plugins resume hello");
@@ -373,6 +384,7 @@ int main(int argc, char** argv) {
             run("sr_sdkcall_stale"); Check(contains("stale, foreign or wrong-type handle"),"closed call cannot be reused");
             run("sr plugins reload hello"); frame();
             const auto before = calls(); run("sr_sdkcall"); Check(calls() == before + 2,"new script generation owns fresh calls");
+            run("sr_sdkcall_entities"); Check(entity_calls() == 9,"reloaded script obtains fresh entity leases");
             run("sr plugins unload hello"); frame(); Check(scalar(3,2) == 8,"script cleanup releases hook and prepared call");
             run("keel plugins unload 2"); run("keel plugins load sr_example"); run("sr plugins load hello"); frame();
             const auto reloaded = calls(); run("sr_sdkcall"); Check(calls() == reloaded + 2,"provider reload reacquires optional direct-call service");

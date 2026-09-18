@@ -25,8 +25,9 @@ enum SDKCall { NoSDKCall = 0 }
 // results support IsNull only; no address exposure, dereference or reuse.
 // Operator-declared buffer adapters support owned strings, int32 arrays and
 // three-float vectors. Their memory remains private to the call; native code
-// must not retain its pointers. Method/entity/aggregate/variadic adapters are
-// not provided here. Native functions must honor the configured buffer types
+// must not retain its pointers. Checked entity and method calls use the
+// configured entity adapters below. Aggregate/variadic adapters are absent.
+// Native functions must honor the configured buffer types
 // and capacities; a wrong native signature is not made safe by these limits.
 //
 // Execute synchronously calls the original function with flags=0, or includes
@@ -84,3 +85,22 @@ native bool SDKCall_SetArray(SDKCall call, int slot, const int[] value, int coun
 native bool SDKCall_GetArray(SDKCall call, int slot, int[] value, int maximum, int &written);
 native bool SDKCall_SetVector(SDKCall call, int slot, const float value[3]);
 native bool SDKCall_GetVector(SDKCall call, int slot, float value[3]);
+
+// A target's entities array names argument and class (exact dynamic schema
+// class, not a base-class cast). Each slot must be a distinct pointer argument
+// without a buffer adapter. A method requires such an adapter at argument 1.
+// SetEntityReference accepts the serial-bearing Source 2 handle bits, not an
+// entity index or SDKTools resource. The call retains the native identity and
+// map epoch, revalidating them and the class immediately before dispatch.
+// SetPlayer also binds the current Player connection and controller; pawn=true
+// additionally binds its pawn. A reconnect or changed controller/pawn requires
+// setting it again. Raw entity addresses never become script values.
+// Entity calls only allow flags=0; pre-hooks could delete an entity before the
+// original runs. Nested native calls may still invoke other hooks. Native code
+// must not retain entity pointers or reuse them after operations that may
+// destroy the entity. Reset releases all retained entities. Per-provider limit:
+// 256 retained identities; replacing a value needs a free slot for its lease.
+// These optional adapters require keels2.entity_access API1. IsNull reports
+// false for an initialized entity argument; it is not an entity validity check.
+native bool SDKCall_SetEntityReference(SDKCall call, int slot, int sourceHandle);
+native bool SDKCall_SetPlayer(SDKCall call, int slot, Player player, bool pawn = false);

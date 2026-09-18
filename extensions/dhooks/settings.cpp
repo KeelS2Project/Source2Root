@@ -76,6 +76,16 @@ void Validate(const Definition& value) {
         }
         if (buffer_bytes > 16384) throw Error("Configured SDKCall buffers exceed 16 KiB per call.");
     }
+    std::set<unsigned> entity_arguments;
+    for (const auto& entity : value.entities) {
+        if (!entity.argument || entity.argument > value.arguments.size() || value.arguments[entity.argument - 1] != KH_VALUE_POINTER ||
+            buffer_arguments.contains(entity.argument) || !entity_arguments.insert(entity.argument).second)
+            throw Error("Entity adapter requires one distinct pointer argument without a buffer adapter.");
+        if (entity.class_name.empty() || entity.class_name.size() > 255 ||
+            std::any_of(entity.class_name.begin(), entity.class_name.end(), [](unsigned char c) {
+                return !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == ':');
+            })) throw Error("Entity adapter requires an exact schema class name.");
+    }
     if (!TextValid(value.module,4095) || !TextValid(value.symbol,512) || !TextValid(value.pattern,16384) || !TextValid(value.profile,512))
         throw Error("Invalid hook resolver text.");
     if (value.source == KH_TARGET_PROFILE) {
@@ -110,7 +120,7 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
             throw Error("Unsupported hook configuration schema.");
         if (!json.at("targets").contains(name)) throw Error("Hook target was not found.");
         const auto& target = json.at("targets").at(name);
-        Keys(target,{"allow_plugins","allow_calls","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments","buffers"});
+        Keys(target,{"allow_plugins","allow_calls","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments","buffers","entities"});
         const auto& allowed = target.at("allow_plugins");
         if (!allowed.is_array() || allowed.empty() || allowed.size() > 128) throw Error("Hook target requires a plugin allow list.");
         bool permitted = false;
@@ -141,7 +151,7 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
         for (const auto& type : arguments) result.arguments.push_back(Type(type));
         if (target.contains("buffers")) {
             const auto& buffers = target.at("buffers");
-            if (!buffers.is_array() || buffers.size() > KEELHOOK_MAX_ARGUMENTS) throw Error("SDKCall buffers require an array of at most32 adapters.");
+            if (!buffers.is_array() || buffers.size() > KEELHOOK_MAX_ARGUMENTS) throw Error("SDKCall buffers require an array of at most 32 adapters.");
             for (const auto& entry : buffers) {
                 Keys(entry,{"argument","kind","capacity","length_argument"});
                 BufferSpec buffer;
@@ -160,6 +170,16 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
                 buffer.capacity = static_cast<unsigned>(capacity);
                 buffer.length_argument = static_cast<unsigned>(length_argument);
                 result.buffers.push_back(buffer);
+            }
+        }
+        if (target.contains("entities")) {
+            const auto& entities = target.at("entities");
+            if (!entities.is_array() || entities.size() > KEELHOOK_MAX_ARGUMENTS) throw Error("SDKCall entities require at most 32 adapters.");
+            for (const auto& entry : entities) {
+                Keys(entry,{"argument","class"});
+                const auto argument = Number(entry,"argument");
+                if (argument < 1 || argument > KEELHOOK_MAX_ARGUMENTS) throw Error("Entity argument is out of range.");
+                result.entities.push_back({static_cast<unsigned>(argument),Text(entry,"class")});
             }
         }
         Validate(result); return result;

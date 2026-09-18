@@ -1,6 +1,6 @@
 #include <source2root_sdkcall>
 
-// Disabled until an operator configures a reviewed scalar function that can
+// Disabled until an operator configures reviewed native functions that can
 // be explicitly called with these values. The catalog target is a placeholder,
 // not an engine signature. Calls happen only on the permission-gated command.
 SDKCall prepared;
@@ -11,7 +11,8 @@ public bool OnPluginStart()
     prepared = SDKCall_Prepare(target);
     DHook_CloseTarget(target);
     return prepared != NoSDKCall && RegisterCommand("sr_scalar_call", "generic", Run)
-        && RegisterCommand("sr_buffer_call", "generic", RunBuffers);
+        && RegisterCommand("sr_buffer_call", "generic", RunBuffers)
+        && RegisterCommand("sr_player_call", "generic", RunPlayer);
 }
 public void RunBuffers(Player player, const char[] arguments)
 {
@@ -45,5 +46,24 @@ public void Run(Player player, const char[] arguments)
     }
     char text[96];
     Format(text, sizeof(text), "Configured call returned %d", result);
+    ReplyToCommand(player, text);
+}
+
+public void RunPlayer(Player player, const char[] arguments)
+{
+    DHookTarget target = DHook_Open("example_player_call");
+    if (target == NoDHookTarget) { ReplyToCommand(player, "The player target is unavailable."); return; }
+    SDKCall call = SDKCall_Prepare(target);
+    DHook_CloseTarget(target);
+    if (call == NoSDKCall) { ReplyToCommand(player, "The player call could not be prepared."); return; }
+    int result;
+    // Bind this connection's current pawn. Reconnects, map changes and pawn
+    // replacements invalidate the binding; this command creates a fresh call.
+    bool completed = SDKCall_SetPlayer(call, 1, player, true)
+        && SDKCall_SetInt(call, 2, 1) && SDKCall_Execute(call) && SDKCall_GetInt(call, 0, result);
+    SDKCall_Close(call);
+    if (!completed) { ReplyToCommand(player, "The configured player call failed."); return; }
+    char text[96];
+    Format(text, sizeof(text), "Configured player call returned %d", result);
     ReplyToCommand(player, text);
 }

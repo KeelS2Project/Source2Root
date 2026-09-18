@@ -1,5 +1,7 @@
 #pragma once
 #include <keels2/keelcall.h>
+#include <keels2/entity_access.h>
+#include <keels2/players.h>
 #include <keels2/native_runtime.h>
 #include <array>
 #include <filesystem>
@@ -16,6 +18,7 @@ struct BufferSpec {
     unsigned argument = 0, capacity = 0, length_argument = 0;
     BufferKind kind = BufferKind::string;
 };
+struct EntitySpec { unsigned argument = 0; std::string class_name; };
 struct Definition {
     unsigned source = 0, result = KH_VALUE_VOID;
     bool method = false, allow_calls = false;
@@ -24,6 +27,7 @@ struct Definition {
     unsigned occurrence = 0;
     std::vector<KeelHookValueType> arguments;
     std::vector<BufferSpec> buffers;
+    std::vector<EntitySpec> entities;
 };
 Definition ReadDefinition(const std::filesystem::path& file, const std::string& name, const std::string& script);
 void Validate(const Definition& definition);
@@ -31,6 +35,15 @@ class Service;
 class Call;
 struct TargetData;
 struct Registration;
+struct EntityLease {
+    EntityLease() = default;
+    EntityLease(const EntityLease&) = delete;
+    EntityLease& operator=(const EntityLease&) = delete;
+    std::shared_ptr<Service> service;
+    KeelEntityHandle handle = 0;
+    KeelEntityInfo identity{};
+    ~EntityLease();
+};
 
 // A frame is a private snapshot. Slot zero is the result; arguments are 1-based.
 // Its native frame and pointers never escape the backend. Only Commit writes
@@ -89,6 +102,9 @@ public:
     unsigned Count() const;
     unsigned Type(unsigned slot) const;
     const Frame& Read(unsigned slot) const;
+    bool IsNull(unsigned slot) const;
+    void SetEntityReference(unsigned slot, std::uint32_t source);
+    void SetPlayer(unsigned slot, const KeelPlayerConnection& player, bool pawn);
     void SetInteger(unsigned slot, std::int32_t value);
     void SetIntegerText(unsigned slot, const std::string& value);
     void SetNumber(unsigned slot, float value);
@@ -106,6 +122,8 @@ private:
     friend class Service;
     Call(std::shared_ptr<Service> service, std::shared_ptr<TargetData> target, const Definition& definition);
     template<class Function> void Edit(unsigned slot, Function function);
+    struct Entity;
+    Entity& WritableEntity(unsigned slot);
     struct Buffer;
     Buffer& WritableBuffer(unsigned slot, BufferKind kind);
     const Buffer& ReadBuffer(unsigned slot, BufferKind kind) const;
@@ -134,6 +152,7 @@ class Service final : public std::enable_shared_from_this<Service> {
 public:
     Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime,
         const KeelCallApi* calls = nullptr);
+    void EntityServices(const KeelEntityAccessApi& access, const KeelEntitiesApi& entities, const KeelPlayersApi& players);
     std::unique_ptr<Target> Open(const Definition& definition);
     std::unique_ptr<Call> Prepare(const Target& target);
     std::unique_ptr<Hook> Attach(const Target& target, unsigned phases, std::int32_t priority,
@@ -141,12 +160,19 @@ public:
     // Retry native removal/restoration failures while retaining callback data.
     // Unload must remain blocked until Empty(), including after script cleanup.
     void Collect();
-    bool Empty() const { return registrations_.empty() && targets_.empty(); }
+    bool Empty() const { return registrations_.empty() && targets_.empty() && !entity_count_; }
     unsigned TargetCount() const { return static_cast<unsigned>(targets_.size()); }
     unsigned HookCount() const { return static_cast<unsigned>(registrations_.size()); }
 private:
     friend class Hook;
     friend class Call;
+    friend struct EntityLease;
+    std::shared_ptr<EntityLease> AcquireEntity(std::uint32_t source);
+    void ValidateEntity(const EntityLease& entity) const;
+    KeelPlayerInfo Player(const KeelPlayerConnection& player) const;
+    void InvokeEntities(const TargetData& target, const std::vector<KeelHookValue>& arguments,
+        const std::vector<BufferSpec>& bounds, const std::vector<KeelEntityAccessSpec>& entities,
+        const std::vector<unsigned>& slots, KeelHookValue& result);
     void Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments,
         const std::vector<BufferSpec>& bounds, KeelHookValue& result);
     void CheckBufferEdits(const KeelHookFrame& before, const Frame& after) const;
@@ -157,6 +183,10 @@ private:
     KeelHookApi hooks_;
     KeelNativeRuntimeApi runtime_;
     KeelCallApi calls_{};
+    KeelEntityAccessApi access_{};
+    KeelEntitiesApi entities_{};
+    KeelPlayersApi players_{};
+    unsigned entity_count_ = 0;
     struct BufferScope {
         KeelHookTargetHandle target;
         const std::vector<KeelHookValue>* arguments;

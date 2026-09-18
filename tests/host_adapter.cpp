@@ -60,6 +60,8 @@ public:
     std::string kick_reason;
     uint32_t pawn_handle = 0x23004;
     std::uint64_t entity_epoch = 1;
+    std::int32_t entity_objects[3]{31,47,63};
+    unsigned entity_call_count = 0;
     KeelResult action_status = KEEL_RESULT_OK;
     std::uint64_t input_buttons = 0, input_context = 1;
     KeelResult input_status = KEEL_RESULT_OK;
@@ -417,6 +419,35 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureSetConVar(const char* name, 
     return active && name && value && active->SetVariable(name, value);
 }
 
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityAccess(
+    unsigned version, GameAdapterEntityAccessApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),1,
+        [](GameAdapter* adapter, const GameEntityAccessRequest* requests, unsigned count,
+            KeelEntityAccessCallback callback, void* data) noexcept -> KeelResult {
+            if (!adapter || !requests || !count || count > 32 || !callback) return KEEL_RESULT_INVALID_ARGUMENT;
+            try {
+                auto& state = *static_cast<Adapter*>(adapter);
+                void* pointers[32]{};
+                for (unsigned i = 0; i < count; ++i) {
+                    std::string error;
+                    const auto status = state.ValidateEntity(requests[i].entity,error);
+                    if (status != KEEL_RESULT_OK) return status;
+                    const auto index = requests[i].entity.source2_handle == 0x12003 ? 0 :
+                        requests[i].entity.source2_handle == 0x23004 ? 1 : 2;
+                    const char* names[]{"CCSPlayerController","CCSPlayerPawn","CTestEntity"};
+                    if (!requests[i].class_name || std::strcmp(requests[i].class_name,names[index])) return KEEL_RESULT_INCOMPATIBLE;
+                    pointers[i] = &state.entity_objects[index];
+                }
+                return callback(data,pointers,count);
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureEntityCalls() { return active ? active->entity_call_count : 0; }
+
 extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityWrites(
     unsigned version, keels2::host::GameAdapterEntityWritesApi* api) noexcept {
     if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
@@ -683,4 +714,18 @@ std::int32_t SrFixtureHookBuffers(char* text, std::uint32_t capacity, std::int32
     for (std::int32_t i = 0; i < count; ++i) { values[i] *= 2; sum += values[i]; }
     for (unsigned i = 0; i < 3; ++i) vector[i] *= 2;
     return sum;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+std::int32_t SrFixtureEntityMethod(void* entity, std::int32_t value, char* text, std::uint32_t capacity) {
+    if (!active || !entity || !text || capacity != 8 || std::strcmp(text,"hello") ||
+        (entity != &active->entity_objects[0] && entity != &active->entity_objects[1])) return -1;
+    ++active->entity_call_count;
+    if (value == 99 && !active->Dispatch("sr_sdkcall_entity_close_active",-1)) return -2;
+    std::memcpy(text,"changed",8);
+    return *static_cast<std::int32_t*>(entity) + value;
 }

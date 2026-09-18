@@ -34,6 +34,11 @@ private:
         if (HostContext().QueryService(KEELCALL_SERVICE_NAME,KEELCALL_API_VERSION,&calls) != KEEL_RESULT_OK) calls = nullptr;
         service_ = std::make_shared<dh::Service>(HostContext().PluginHandle(),Require<KeelHookApi>(KEELHOOK_SERVICE_NAME,KEELHOOK_API_VERSION),
             Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME,KEELS2_NATIVE_RUNTIME_API_VERSION),static_cast<const KeelCallApi*>(calls));
+        const void* access = nullptr;
+        if (HostContext().QueryService(KEELS2_ENTITY_ACCESS_SERVICE_NAME,KEELS2_ENTITY_ACCESS_API_VERSION,&access) == KEEL_RESULT_OK && access)
+            service_->EntityServices(*static_cast<const KeelEntityAccessApi*>(access),
+                Require<KeelEntitiesApi>(KEELS2_ENTITIES_SERVICE_NAME,KEELS2_ENTITIES_API_VERSION),
+                Require<KeelPlayersApi>(KEELS2_PLAYERS_SERVICE_NAME,KEELS2_PLAYERS_API_VERSION));
         return RegisterNative("DHook_Open",1,&DHooks::Open)
             && RegisterNative("DHook_CloseTarget",1,&DHooks::CloseTarget)
             && RegisterNative("DHook_Add",5,&DHooks::Add)
@@ -75,7 +80,9 @@ private:
             && RegisterNative("SDKCall_SetArray",4,&DHooks::CallSetArray)
             && RegisterNative("SDKCall_GetArray",5,&DHooks::CallArray)
             && RegisterNative("SDKCall_SetVector",3,&DHooks::CallSetVector)
-            && RegisterNative("SDKCall_GetVector",3,&DHooks::CallVector);
+            && RegisterNative("SDKCall_GetVector",3,&DHooks::CallVector)
+            && RegisterNative("SDKCall_SetEntityReference",3,&DHooks::CallSetEntity)
+            && RegisterNative("SDKCall_SetPlayer",4,&DHooks::CallSetPlayer);
     }
     bool PrepareExtensionUnload() override {
         if (!service_) return true;
@@ -184,13 +191,25 @@ private:
         call.Output(3,call.Int(4),""); return Invoke(call,[&] { call.Output(3,call.Int(4),Prepared(call).Read(call.Int(2)).NumberText(call.Int(2))); return 1; });
     }
     std::int32_t CallIsNull(NativeCall& call) {
-        call.OutputCell(3,0); return Invoke(call,[&] { call.OutputCell(3,Prepared(call).Read(call.Int(2)).IsNull(call.Int(2))); return 1; });
+        call.OutputCell(3,0); return Invoke(call,[&] { call.OutputCell(3,Prepared(call).IsNull(call.Int(2))); return 1; });
     }
     std::int32_t CallSetInteger(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetInteger(call.Int(2),call.Int(3)); return 1; }); }
     std::int32_t CallSetIntegerText(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetIntegerText(call.Int(2),call.String(3)); return 1; }); }
     std::int32_t CallSetNumber(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNumber(call.Int(2),call.Float(3)); return 1; }); }
     std::int32_t CallSetNumberText(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNumberText(call.Int(2),call.String(3)); return 1; }); }
     std::int32_t CallSetNull(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNull(call.Int(2)); return 1; }); }
+    std::int32_t CallSetEntity(NativeCall& call) {
+        return Invoke(call,[&] { Prepared(call).SetEntityReference(call.Int(2),static_cast<std::uint32_t>(call.Int(3))); return 1; });
+    }
+    std::int32_t CallSetPlayer(NativeCall& call) {
+        return Invoke(call,[&] {
+            SrPlayerIdentity player{sizeof(player)};
+            if (!call.Player(call.Int(3),player)) throw dh::Error("SDKCall player handle is stale or invalid.");
+            const auto pawn = call.Int(4);
+            if (pawn != 0 && pawn != 1) throw dh::Error("SDKCall player mode requires a boolean.");
+            Prepared(call).SetPlayer(call.Int(2),{player.slot,0,player.connection},pawn != 0); return 1;
+        });
+    }
     std::int32_t CallSetString(NativeCall& call) {
         return Invoke(call,[&] { Prepared(call).SetString(call.Int(2),call.String(3),call.Int(4)); return 1; });
     }

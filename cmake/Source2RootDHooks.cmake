@@ -1,6 +1,6 @@
 option(SR_DHOOKS_EXTENSION "Build configured typed scripting detours" ON)
 if(SR_DHOOKS_EXTENSION)
-    add_library(sr_dhooks STATIC extensions/dhooks/hooks.cpp extensions/dhooks/frame.cpp extensions/dhooks/settings.cpp extensions/dhooks/call.cpp)
+    add_library(sr_dhooks STATIC extensions/dhooks/hooks.cpp extensions/dhooks/frame.cpp extensions/dhooks/settings.cpp extensions/dhooks/call.cpp extensions/dhooks/entities.cpp)
     target_include_directories(sr_dhooks PUBLIC extensions/dhooks PRIVATE "${SR_JSON_INCLUDE}")
     target_link_libraries(sr_dhooks PUBLIC KeelS2::SDK)
     add_library(source2root_dhooks MODULE extensions/dhooks/extension.cpp)

@@ -10,18 +10,30 @@ struct Call::Buffer {
     std::vector<std::int32_t> cells;
     std::array<float, 3> vector{};
 };
+struct Call::Entity {
+    EntitySpec spec;
+    std::shared_ptr<EntityLease> lease;
+    KeelPlayerConnection player{};
+    std::uint32_t controller = KEELS2_INVALID_SOURCE2_ENTITY_HANDLE;
+    bool pawn = false;
+};
 struct Call::State {
     std::shared_ptr<Service> service;
     std::shared_ptr<TargetData> target;
     Frame values;
     std::bitset<KEELHOOK_MAX_ARGUMENTS> initialized;
     std::vector<Buffer> buffers;
+    std::vector<Entity> entities;
     bool busy = false, result = false;
     State(std::shared_ptr<Service> service_value, std::shared_ptr<TargetData> target_value, Frame frame)
         : service(std::move(service_value)), target(std::move(target_value)), values(std::move(frame)) {}
 };
 Call::Call(std::shared_ptr<Service> service, std::shared_ptr<TargetData> target, const Definition& definition)
     : state_(std::make_shared<State>(std::move(service),std::move(target),Frame(definition))) {
+    state_->entities.reserve(definition.entities.size());
+    for (const auto& spec : definition.entities) {
+        Entity entity; entity.spec = spec; state_->entities.push_back(std::move(entity));
+    }
     state_->buffers.reserve(definition.buffers.size());
     for (const auto& spec : definition.buffers) {
         Buffer buffer; buffer.spec = spec; state_->buffers.push_back(std::move(buffer));
@@ -40,6 +52,8 @@ const Frame& Call::Read(unsigned slot) const {
 template<class Function> void Call::Edit(unsigned slot, Function function) {
     state_->service->Thread();
     if (state_->busy || !slot || slot > state_->values.Count()) throw Error("SDKCall argument is busy or out of range.");
+    for (const auto& entity : state_->entities)
+        if (entity.spec.argument == slot) throw Error("Configured entity arguments require their entity setter.");
     for (const auto& buffer : state_->buffers)
         if (buffer.spec.argument == slot || buffer.spec.length_argument == slot)
             throw Error("Configured buffer arguments and lengths require their buffer setter.");
@@ -118,10 +132,39 @@ std::array<float, 3> Call::Vector(unsigned slot) const {
         throw Error("Native vector buffer contains a nonfinite component.");
     return result;
 }
+Call::Entity& Call::WritableEntity(unsigned slot) {
+    state_->service->Thread();
+    if (state_->busy) throw Error("SDKCall is busy.");
+    for (auto& entity : state_->entities) if (entity.spec.argument == slot) return entity;
+    throw Error("SDKCall argument does not have a configured entity adapter.");
+}
+void Call::SetEntityReference(unsigned slot, std::uint32_t source) {
+    auto& entity = WritableEntity(slot);
+    auto lease = state_->service->AcquireEntity(source);
+    entity.lease = std::move(lease); entity.player = {}; entity.controller = KEELS2_INVALID_SOURCE2_ENTITY_HANDLE; entity.pawn = false;
+    state_->initialized.set(slot - 1); state_->result = false;
+}
+void Call::SetPlayer(unsigned slot, const KeelPlayerConnection& player, bool pawn) {
+    auto& entity = WritableEntity(slot);
+    const auto before = state_->service->Player(player);
+    const auto source = pawn ? before.pawn_handle : before.controller_handle;
+    auto lease = state_->service->AcquireEntity(source);
+    const auto after = state_->service->Player(player);
+    if (after.controller_handle != before.controller_handle || (pawn && after.pawn_handle != source))
+        throw Error("Player controller or pawn changed during SDKCall setup.");
+    entity.lease = std::move(lease); entity.player = player; entity.controller = before.controller_handle; entity.pawn = pawn;
+    state_->initialized.set(slot - 1); state_->result = false;
+}
+bool Call::IsNull(unsigned slot) const {
+    const auto& values = Read(slot);
+    for (const auto& entity : state_->entities) if (entity.spec.argument == slot) return !entity.lease;
+    return values.IsNull(slot);
+}
 void Call::Reset() {
     state_->service->Thread();
     if (state_->busy) throw Error("SDKCall is busy.");
     state_->initialized.reset(); state_->result = false;
+    for (auto& entity : state_->entities) { entity.lease.reset(); entity.player = {}; }
     for (auto& buffer : state_->buffers) {
         buffer.text.clear(); buffer.cells.clear(); buffer.vector = {};
         state_->values.arguments_[buffer.spec.argument - 1].scalar.pointer = nullptr;
@@ -136,6 +179,21 @@ void Call::Execute(unsigned flags) {
     state->result = false;
     if (flags & ~KEELCALL_INVOKE_HOOKS) throw Error("Invalid SDKCall flags.");
     if (state->initialized.count() != state->values.Count()) throw Error("Every SDKCall argument must be initialized.");
+    if (!state->entities.empty() && flags) throw Error("Entity calls require original execution; pre-hooks could invalidate their entities.");
+    std::vector<KeelEntityAccessSpec> entities;
+    std::vector<unsigned> entity_slots;
+    for (const auto& entity : state->entities) {
+        if (!entity.lease) throw Error("SDKCall entity is not initialized.");
+        state->service->ValidateEntity(*entity.lease);
+        if (entity.player.generation) {
+            const auto player = state->service->Player(entity.player);
+            if (player.controller_handle != entity.controller ||
+                (entity.pawn && player.pawn_handle != entity.lease->identity.source2_handle))
+                throw Error("SDKCall player controller or pawn changed.");
+        }
+        entities.push_back({sizeof(KeelEntityAccessSpec), 0, entity.lease->handle, entity.spec.class_name.c_str()});
+        entity_slots.push_back(entity.spec.argument);
+    }
     std::vector<BufferSpec> bounds;
     bounds.reserve(state->buffers.size());
     for (const auto& buffer : state->buffers) {
@@ -147,7 +205,8 @@ void Call::Execute(unsigned flags) {
     struct Guard { bool& busy; ~Guard() { busy = false; } } guard{state->busy};
     state->busy = true;
     KeelHookValue result{};
-    state->service->Invoke(*state->target,flags,state->values.arguments_,bounds,result);
+    if (entities.empty()) state->service->Invoke(*state->target,flags,state->values.arguments_,bounds,result);
+    else state->service->InvokeEntities(*state->target,state->values.arguments_,bounds,entities,entity_slots,result);
     state->values.result_ = result; state->result = true;
 }
 }

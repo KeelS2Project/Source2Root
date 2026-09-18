@@ -80,7 +80,9 @@ std::unique_ptr<Call> Service::Prepare(const Target& target) {
     Thread();
     if (!calls_.invoke) throw Error("Direct-call host service is unavailable.");
     if (target.service_.get() != this || !target.definition_.allow_calls) throw Error("This configured target does not allow direct calls.");
-    if (target.definition_.method) throw Error("Script method calls require a future checked object-pointer adapter.");
+    if (target.definition_.method && std::none_of(target.definition_.entities.begin(), target.definition_.entities.end(),
+        [](const auto& entity) { return entity.argument == 1; })) throw Error("Method calls require a configured entity adapter for argument 1.");
+    if (!target.definition_.entities.empty() && !access_.visit) throw Error("Checked entity calls are unavailable on this host.");
     return std::unique_ptr<Call>(new Call(shared_from_this(),target.data_,target.definition_));
 }
 void Service::Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments,

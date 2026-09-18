@@ -137,6 +137,28 @@ void Definitions(const std::filesystem::path& directory) {
         malformed.replace(malformed.find(buffer_fields),buffer_fields.size(),text);
         save(malformed); Reject([&] { ReadDefinition(path,"buffers","first"); },"malformed buffer config rejected");
     }
+    const std::string entity_config = R"({"schema":1,"targets":{"entity":{"allow_calls":true,"allow_plugins":["first"],"source":"symbol","module":"fixture","symbol":"Method","method":true,"return":"int32","arguments":["pointer","int32","pointer","uint32"],"entities":[{"argument":1,"class":"CTestEntity"}],"buffers":[{"argument":3,"kind":"string","capacity":16,"length_argument":4}]}}})";
+    save(entity_config); const auto entity = ReadDefinition(path,"entity","first");
+    Check(entity.method && entity.entities.size()==1 && entity.entities[0].argument==1 &&
+        entity.entities[0].class_name=="CTestEntity" && entity.buffers.size()==1,"checked method and buffer adapters parsed");
+    invalid = entity; invalid.entities.push_back(invalid.entities[0]);
+    Reject([&] { Validate(invalid); },"duplicate entity argument rejected");
+    invalid = entity; invalid.entities[0].argument = 2;
+    Reject([&] { Validate(invalid); },"entity needs pointer argument");
+    invalid = entity; invalid.entities[0].argument = 3;
+    Reject([&] { Validate(invalid); },"entity and buffer may not share memory slot");
+    for (const auto& name : {std::string(),std::string("bad class"),std::string(256,'x'),std::string("../CEntity")}) {
+        invalid = entity; invalid.entities[0].class_name = name;
+        Reject([&] { Validate(invalid); },"invalid entity schema class rejected");
+    }
+    const std::string descriptor = R"({"argument":1,"class":"CTestEntity"})";
+    for (const auto& replacement : {std::string(R"({"argument":0,"class":"CTestEntity"})"),
+        std::string(R"({"argument":33,"class":"CTestEntity"})"),std::string(R"({"argument":1,"class":true})"),
+        std::string(R"({"argument":1,"class":"CTestEntity","offset":4})")}) {
+        auto bad_entity = entity_config;
+        bad_entity.replace(bad_entity.find(descriptor),descriptor.size(),replacement);
+        save(bad_entity); Reject([&] { ReadDefinition(path,"entity","first"); },"malformed entity adapter rejected");
+    }
     save(valid);
 }
 }
