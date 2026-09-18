@@ -69,6 +69,33 @@ public:
     unsigned round_caps = 1, round_count = 0;
     KeelResult round_cap_status = KEEL_RESULT_OK, round_status = KEEL_RESULT_OK;
     KeelRoundTermination last_round{};
+    unsigned stat_read_caps = 15, stat_write_caps = 15, stat_reads = 0, stat_writes = 0, stat_mutation = 0;
+    KeelResult stat_cap_status = KEEL_RESULT_OK, stat_read_status = KEEL_RESULT_OK, stat_write_status = KEEL_RESULT_OK;
+    std::array<std::int32_t,4> statistics{800,7,3,2};
+    KeelResult AccessStatistic(const GameEntityIdentity& controller, unsigned key, std::int32_t& value, bool write) {
+        std::string error;
+        const auto valid = ValidateEntity(controller,error);
+        if (valid != KEEL_RESULT_OK) return valid;
+        if (controller.source2_handle != 0x12003) return KEEL_RESULT_INCOMPATIBLE;
+        std::size_t index;
+        switch (key) {
+            case KEELS2_PLAYER_STAT_MONEY: index = 0; break;
+            case KEELS2_PLAYER_STAT_MATCH_KILLS: index = 1; break;
+            case KEELS2_PLAYER_STAT_MATCH_DEATHS: index = 2; break;
+            case KEELS2_PLAYER_STAT_MATCH_ASSISTS: index = 3; break;
+            default: return KEEL_RESULT_INVALID_ARGUMENT;
+        }
+        if (!((write ? stat_write_caps : stat_read_caps) & key)) return KEEL_RESULT_UNSUPPORTED;
+        if (write) {
+            if (value < 0) return KEEL_RESULT_INVALID_ARGUMENT;
+            ++stat_writes; statistics[index] = value;
+            return stat_write_status;
+        }
+        ++stat_reads; value = statistics[index];
+        if (stat_mutation == 1) ++entity_epoch;
+        if (stat_mutation == 2) ++user_id;
+        return stat_read_status;
+    }
     unsigned entity_write_caps = 1, entity_write_count = 0;
     KeelResult entity_write_status = KEEL_RESULT_OK;
     bool entity_write_callback = false;
@@ -592,4 +619,36 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureRoundState(unsigned caps, un
     if (!active) return;
     active->round_caps = caps; active->round_cap_status = static_cast<KeelResult>(capability_result);
     active->round_status = static_cast<KeelResult>(result);
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryPlayerStatistics(
+    unsigned version, keels2::host::GameAdapterPlayerStatisticsApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {};
+    if (version != keels2::host::kGameAdapterPlayerStatisticsVersion) return KEEL_RESULT_INCOMPATIBLE;
+    api->size = sizeof(*api); api->api_version = version;
+    api->capabilities = [](keels2::host::GameAdapter* base, unsigned* readable, unsigned* writable) noexcept {
+        if (!base || !readable || !writable) return KEEL_RESULT_INVALID_ARGUMENT;
+        const auto& adapter = *static_cast<Adapter*>(base);
+        *readable = adapter.stat_read_caps; *writable = adapter.stat_write_caps;
+        return adapter.stat_cap_status;
+    };
+    api->read = [](keels2::host::GameAdapter* base, const GameEntityIdentity* controller, unsigned key, std::int32_t* value) noexcept {
+        if (!base || !controller || !value) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<Adapter*>(base)->AccessStatistic(*controller,key,*value,false); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    api->write = [](keels2::host::GameAdapter* base, const GameEntityIdentity* controller, unsigned key, std::int32_t value) noexcept {
+        if (!base || !controller) return KEEL_RESULT_INVALID_ARGUMENT;
+        try { return static_cast<Adapter*>(base)->AccessStatistic(*controller,key,value,true); }
+        catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    };
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureStatisticsWrites() { return active ? active->stat_writes : 0; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureStatisticsState(
+    unsigned readable, unsigned writable, KeelResult caps, KeelResult read, KeelResult write, unsigned mutation) {
+    if (!active) return;
+    active->stat_read_caps = readable; active->stat_write_caps = writable; active->stat_cap_status = caps;
+    active->stat_read_status = read; active->stat_write_status = write; active->stat_mutation = mutation;
 }

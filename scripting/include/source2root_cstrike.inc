@@ -77,3 +77,30 @@ native bool CS_GetRoundCapabilities(int &capabilities);
 // completed transition. Repeated calls/game logic may supersede the result.
 // No OnTerminateRound forward or blockhook option is provided by this API.
 native bool CS_TerminateRound(float delay, CSRoundEndReason reason, int winningTeam = 0);
+
+#define CS_STAT_MONEY 1
+#define CS_STAT_MATCH_KILLS 2
+#define CS_STAT_MATCH_DEATHS 4
+#define CS_STAT_MATCH_ASSISTS 8
+// Optional keels2.player_statistics API 1. Masks cover only the four component
+// statistics below, not score/MVPs. Binary support does not imply map readiness.
+// Both masks are zero on failure; existing player/round APIs remain usable when
+// this optional host service is absent.
+native bool CS_GetPlayerStatisticsCapabilities(int &readable, int &writable);
+// Current in-game money and match totals from the controller's owned services.
+// Getter output is zero on failure. Player connection/engine identity is checked
+// around reads; stale Player handles cannot target replacement connections.
+native bool CS_GetPlayerMoney(Player player, int &money);
+native bool CS_GetPlayerKills(Player player, int &kills);
+native bool CS_GetPlayerDeaths(Player player, int &deaths);
+native bool CS_GetPlayerAssists(Player player, int &assists);
+// Direct stored-value writes plus network notification. Values must be >=0.
+// Scripts must respect game-mode limits such as mp_maxmoney; these setters do
+// not clamp to that ConVar, perform transactions or simulate gameplay events.
+// They do not award kill/assist credit, update every related aggregate or grant
+// achievements. Game rules can overwrite them; notification failure can follow
+// a completed write. Client-visible replication still requires game acceptance.
+native bool CS_SetPlayerMoney(Player player, int money);
+native bool CS_SetPlayerKills(Player player, int kills);
+native bool CS_SetPlayerDeaths(Player player, int deaths);
+native bool CS_SetPlayerAssists(Player player, int assists);
