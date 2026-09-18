@@ -1,0 +1,17 @@
+--- a/util/mkbuildinf.pl
++++ b/util/mkbuildinf.pl
+@@ -11,6 +11,14 @@
+ 
+ my $platform = pop @ARGV;
+ my $cflags = join(' ', @ARGV);
++# Source2Root, 2026-09-18: keep private build roots out of diagnostic metadata.
++if (my $root = $ENV{SR_WINDOWS_DEPENDENCY_ROOT}) {
++    $root =~ tr{\\}{/};
++    my $native = $root;
++    $native =~ tr{/}{\\};
++    $cflags =~ s/\Q$root\E/dependencies/gi;
++    $cflags =~ s/\Q$native\E/dependencies/gi;
++}
+ $cflags =~ s(\\)(\\\\)g;
+ $cflags = "compiler: $cflags";
+ 

@@ -1,9 +1,11 @@
 """Extension package assembly. Does not load modules, run tests or activate plugins."""
 import hashlib
+import io
 import json
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
+import tarfile
 
 
 def digest(path):
@@ -30,6 +32,9 @@ def inventory(build, configuration):
             raise RuntimeError('Extension module filename must be a basename')
     for library in data['libraries']:
         relative(library['installed'])
+    missing = set(data.get('required_external_sources', [])) - {d['name'] for d in data['dependencies']}
+    if missing:
+        raise RuntimeError('Missing corresponding Windows dependency sources: ' + ', '.join(sorted(missing)))
     return data
 
 
@@ -51,25 +56,37 @@ def source_inputs(data, source, lock):
         target = source / 'dependencies' / name
         if target.exists():
             raise RuntimeError(f'Duplicate dependency source destination: {name}')
-        # Refuse source-tree links to unrelated data. Internal links are copied
-        # as regular files so the ZIP also relocates on Windows.
-        for entry in original.rglob('*'):
-            if entry.is_symlink() and not entry.resolve(strict=True).is_relative_to(original):
-                raise RuntimeError(f'Extension source link escapes its tree: {entry}')
-        shutil.copytree(original, target,
-            ignore=shutil.ignore_patterns('.git', '__pycache__', '*.pyc'))
+        if dependency.get('git_snapshot'):
+            actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=original, text=True).strip()
+            if actual != lock[name]['revision'] or subprocess.check_output(
+                    ['git', 'diff', 'HEAD', '--name-only'], cwd=original, text=True).strip():
+                raise RuntimeError(f'Dependency recipe differs from the lock: {name}')
+            content = subprocess.check_output(['git', 'archive', 'HEAD'], cwd=original)
+            target.mkdir(parents=True)
+            with tarfile.open(fileobj=io.BytesIO(content)) as archive:
+                archive.extractall(target, filter='data')
+        else:
+            # Internal links become regular files so ZIPs relocate on Windows.
+            for entry in original.rglob('*'):
+                if entry.is_symlink() and not entry.resolve(strict=True).is_relative_to(original):
+                    raise RuntimeError(f'Extension source link escapes its tree: {entry}')
+            shutil.copytree(original, target,
+                ignore=shutil.ignore_patterns('.git', '__pycache__', '*.pyc'))
         hashes = {p.relative_to(target).as_posix(): digest(p)
                   for p in sorted(target.rglob('*')) if p.is_file()}
         manifest[name] = {'upstream': lock[name], 'files': hashes,
             'snapshot_sha256': hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()}
-        key = dependency['fetchcontent'].upper()
-        if not key.startswith('SR_') or not key.replace('_', '').isalnum():
-            raise RuntimeError('Invalid FetchContent source key')
-        preload.append(f'set(FETCHCONTENT_SOURCE_DIR_{key} "${{CMAKE_CURRENT_LIST_DIR}}/{name}" CACHE PATH "Packaged source" FORCE)')
-        for entry in original.rglob('*'):
+        if dependency.get('fetchcontent'):
+            key = dependency['fetchcontent'].upper()
+            if not key.startswith('SR_') or not key.replace('_', '').isalnum():
+                raise RuntimeError('Invalid FetchContent source key')
+            preload.append(f'set(FETCHCONTENT_SOURCE_DIR_{key} "${{CMAKE_CURRENT_LIST_DIR}}/{name}" CACHE PATH "Packaged source" FORCE)')
+        else:
+            preload.append(f'# {name}: external dependency source and build recipe; build before configuring Source2Root.')
+        for entry in target.rglob('*'):
             if not entry.is_file() or not entry.name.upper().startswith(('LICENSE', 'LICENCE', 'COPYING', 'COPYRIGHT', 'NOTICE')):
                 continue
-            destination = licenses / name / entry.relative_to(original)
+            destination = licenses / name / entry.relative_to(target)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(entry, destination)
     (source / 'extension-source-inputs.json').write_text(json.dumps(manifest, indent=2) + '\n')

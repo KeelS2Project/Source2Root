@@ -40,10 +40,15 @@ int main(int argc, char** argv) {
         auto invalid = config;
         invalid.ca = argv[2];
         Reject([&] { mysql::Query(invalid, {"SELECT 1", {}}, canceled); }, "untrusted TLS issuer rejected");
+        invalid.ca.clear();
+        Reject([&] { mysql::Query(invalid, {"SELECT 1", {}}, canceled); }, "private issuer requires its CA even on loopback");
         invalid = db::ReadSettings(argv[1], "hostname_mismatch", "driver_test");
         bool hostname_rejected = false;
         try { mysql::Query(invalid, {"SELECT 1", {}}, canceled); }
-        catch (const db::Error& error) { hostname_rejected = std::string(error.what()).find("(2026)") != std::string::npos; }
+        catch (const db::Error& error) {
+            hostname_rejected = std::string(error.what()).find("(2026)") != std::string::npos;
+            if (!hostname_rejected) std::cerr << "Unexpected hostname rejection: " << error.what() << '\n';
+        }
         Check(hostname_rejected, "trusted certificate with wrong server identity rejected by TLS");
         invalid = config; invalid.password += "wrong";
         bool hidden = false;
@@ -86,7 +91,9 @@ int main(int argc, char** argv) {
         }
         Check(run("SELECT count(*) FROM source2root_driver_checks").rows[0][0].integer == 3, "canceled transaction rolled back");
         const auto start = std::chrono::steady_clock::now();
-        Reject([&] { run("SELECT SLEEP(4)"); }, "finite network read timeout");
+        auto short_timeout = config;
+        short_timeout.timeout = 2;
+        Reject([&] { mysql::Query(short_timeout, {"SELECT SLEEP(4)", {}}, canceled); }, "finite network read timeout");
         Check(std::chrono::steady_clock::now() - start < std::chrono::seconds(6), "timeout bounds client wait");
         Check(run("SELECT 9").rows[0][0].integer == 9, "new connection succeeds after a timed-out query");
         run("DROP TABLE source2root_driver_checks");

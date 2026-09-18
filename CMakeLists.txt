@@ -177,6 +177,7 @@ if(BUILD_TESTING)
     endif()
     if(SR_HTTP_EXTENSION)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        find_program(SR_TEST_OPENSSL NAMES openssl REQUIRED)
         add_executable(sr_http_test tests/http_test.cpp)
         target_link_libraries(sr_http_test PRIVATE sr_http Threads::Threads)
         sr_compile_script(http tests/scripts/http.sp)
@@ -185,7 +186,7 @@ if(BUILD_TESTING)
         target_include_directories(sr_http_native_fixture PRIVATE include)
         target_link_libraries(sr_http_native_fixture PRIVATE Threads::Threads KeelS2::SDK KeelS2::SourceSDK)
         add_test(NAME http_backend COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/http_fixture.py"
-            --root "${CMAKE_BINARY_DIR}/test-fixtures/http-backend" -- $<TARGET_FILE:sr_http_test>)
+            --root "${CMAKE_BINARY_DIR}/test-fixtures/http-backend" --openssl "${SR_TEST_OPENSSL}" -- $<TARGET_FILE:sr_http_test>)
         set_tests_properties(http_backend PROPERTIES TIMEOUT 65)
     endif()
     if(SR_REGEX_EXTENSION)
@@ -402,7 +403,7 @@ if(BUILD_TESTING)
         endif()
         if(SR_HTTP_EXTENSION)
             add_test(NAME http_native_module COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/http_fixture.py"
-                --root "${CMAKE_BINARY_DIR}/test-fixtures/http-module-server" -- $<TARGET_FILE:sr_module_integration>
+                --root "${CMAKE_BINARY_DIR}/test-fixtures/http-module-server" --openssl "${SR_TEST_OPENSSL}" -- $<TARGET_FILE:sr_module_integration>
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
                 $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_http>
                 "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/http.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
@@ -637,4 +638,9 @@ if(BUILD_TESTING)
         "${CMAKE_SOURCE_DIR}/tools/migrate_admins.py" $<TARGET_FILE:sr_permissions_test>)
     add_test(NAME install_configuration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/install_test.py"
         "${CMAKE_SOURCE_DIR}/tools/live.py")
+    if(WIN32 AND TARGET libmariadb)
+        get_property(sr_tests DIRECTORY PROPERTY TESTS)
+        set_property(TEST ${sr_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libmariadb>")
+    endif()
 endif()

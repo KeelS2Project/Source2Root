@@ -41,6 +41,8 @@ def main():
     parser.add_argument("--sanitizers", action="store_true")
     parser.add_argument("--keels2-source", type=Path,
         help="Local repository containing the locked KeelS2 commit; copied into the build dependencies")
+    parser.add_argument("--cmake-arg", action="append", default=[],
+        help="Additional Source2Root configure argument, e.g. --cmake-arg=-DOPENSSL_ROOT_DIR=path")
     args = parser.parse_args()
     output = args.output.resolve()
     deps = output / "deps"
@@ -82,7 +84,8 @@ def main():
         env["LINK"] = (env.get("LINK", "") + " /PDBALTPATH:%_PDB%").strip()
     cmake_flags = []
     if os.name == "nt":
-        cmake_flags = [f'-DCMAKE_CXX_FLAGS=/experimental:deterministic /pathmap:"{output.as_posix()}"=build /pathmap:"{ROOT.as_posix()}"=source2root',
+        mapped_flags = f'/experimental:deterministic /pathmap:"{output.as_posix()}"=build /pathmap:"{ROOT.as_posix()}"=source2root'
+        cmake_flags = [f'-DCMAKE_CXX_FLAGS={mapped_flags}', f'-DCMAKE_C_FLAGS={mapped_flags}',
                        '-DCMAKE_SHARED_LINKER_FLAGS=/PDBALTPATH:%_PDB%',
                        '-DCMAKE_MODULE_LINKER_FLAGS=/PDBALTPATH:%_PDB%',
                        '-DCMAKE_EXE_LINKER_FLAGS=/PDBALTPATH:%_PDB%']
@@ -114,7 +117,7 @@ def main():
     run("cmake", "-S", ROOT, "-B", build, f"-DCMAKE_BUILD_TYPE={args.configuration}",
         "-UKeelS2_DIR", f"-DCMAKE_PREFIX_PATH={sdk}", f"-DSR_KEELS2_BUILD={sdk_build}", f"-DSOURCEPAWN_ROOT={deps / 'sourcepawn'}",
         f"-DSOURCEPAWN_BUILD={pawn_build}", f"-DSR_JSON_INCLUDE={deps}",
-        f"-DSR_SANITIZERS={'ON' if args.sanitizers else 'OFF'}", *cmake_flags)
+        f"-DSR_SANITIZERS={'ON' if args.sanitizers else 'OFF'}", *cmake_flags, *args.cmake_arg)
     run("cmake", "--build", build, "--config", args.configuration, "--parallel", "2")
     run("ctest", "--test-dir", build, "-C", args.configuration, "--output-on-failure", "--timeout", "30")
 

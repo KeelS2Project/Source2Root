@@ -82,7 +82,7 @@ struct Probe {
                 call.OutputArray(6, 3, {31});
                 call.OutputCell(8, 42);
                 Check(!call.DataPath().empty() && !call.DataPath(true).empty(), "owned and shared data paths");
-                Check(call.ConfigPath().ends_with("configs/extensions/test.native") &&
+                Check(std::filesystem::path(call.ConfigPath()).generic_string().ends_with("configs/extensions/test.native") &&
                     (call.ScriptId() == "first" || call.ScriptId() == "second"), "extension configuration scope and actual plugin identity");
                 *result = call.Own(7, std::make_unique<Value>(&probe.host));
                 if (!probe.first) { probe.first = *result; probe.first_owner = call.Owner(); }

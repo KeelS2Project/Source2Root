@@ -13,8 +13,10 @@ parser.add_argument("build")
 parser.add_argument("--staged-source", required=True)
 parser.add_argument("--sanitize", action="store_true")
 parser.add_argument("--windows", action="store_true")
+parser.add_argument("--openssl-prefix")
 parser.add_argument("--flex", required=True)
 parser.add_argument("--bison", required=True)
+parser.add_argument("--perl", required=True)
 args = parser.parse_args()
 original = Path(args.source).resolve(strict=True)
 staged = Path(args.staged_source).resolve()
@@ -48,14 +50,16 @@ command = [sys.executable, "-m", "mesonbuild.mesonmain", "setup", args.build, st
            "-Dssl=openssl", "-Db_staticpic=true", "-Ddefault_library=static", "-Dreadline=disabled",
            "-Dicu=disabled", "-Dlibcurl=disabled", "-Dzlib=disabled", "-Dzstd=disabled", "-Dgssapi=disabled",
            "-Dldap=disabled", "-Dtap_tests=disabled"]
-command.extend(["-DFLEX=" + args.flex, "-DBISON=" + args.bison])
+command.extend(["-DFLEX=" + args.flex, "-DBISON=" + args.bison, "-DPERL=" + args.perl])
 if (Path(args.build) / "meson-private/coredata.dat").exists():
     marker = Path(args.build) / "source2root-source-root.txt"
     command.append("--reconfigure" if marker.is_file() and marker.read_text() == str(staged) else "--wipe")
 if args.sanitize:
     command.append("-Db_sanitize=address,undefined")
 if args.windows:
-    command.append("-Db_vscrt=md")
+    command.extend(["-Db_vscrt=md", "-Dc_link_args=['ws2_32.lib','crypt32.lib','bcrypt.lib']"])
+if args.openssl_prefix:
+    command.append("-Dcmake_prefix_path=" + str(Path(args.openssl_prefix).resolve(strict=True)))
 result = subprocess.run(command).returncode
 if result == 0:
     (Path(args.build) / "source2root-source-root.txt").write_text(str(staged))

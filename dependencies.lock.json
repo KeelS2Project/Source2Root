@@ -2,7 +2,7 @@
   "schema": 1,
   "keels2": {
     "repository": "https://github.com/KeelS2Project/KeelS2.git",
-    "revision": "eeec93f492f8d86ada583ac2a5d0c90cdf6dbb93",
+    "revision": "7770d3246873fa98b85dc551b43f234e6915e46d",
     "version": "1.0.0",
     "plugin_abi": 4,
     "manifest_version": 1,
@@ -84,5 +84,30 @@
     "version": "1.12.0",
     "url": "https://files.pythonhosted.org/packages/07/68/b0117422eb0a46d9d8d9e328f0c5b5c835179bfc058688bca35c90c89eba/meson-1.12.0-py3-none-any.whl",
     "sha256": "71f133147fa0fcfe8f4df49fa1045771064947834538409e5d97b3613aac8b4e"
+  },
+  "openssl": {
+    "version": "3.6.3",
+    "repository": "https://github.com/openssl/openssl",
+    "url": "https://github.com/openssl/openssl/archive/openssl-3.6.3.tar.gz",
+    "sha512": "a89c08101fa1d7e3c09b14f4a90d450bcf336a4f6a3e6e4ea990e4deddcd9ce250472f9114438fd134ff4b47fe93dd47232308567088b2b1c0b2eb50e3b56bdf",
+    "usage": "Windows static TLS dependency; source modifications and recipes from the pinned vcpkg port; Linux uses system TLS"
+  },
+  "zlib": {
+    "version": "1.3.2",
+    "repository": "https://github.com/madler/zlib",
+    "url": "https://github.com/madler/zlib/archive/v1.3.2.tar.gz",
+    "sha512": "16fea4df307a68cf0035858abe2fd550250618a97590e202037acd18a666f57afc10f8836cbbd472d54a0e76539d0e558cb26f059d53de52ff90634bbf4f47d4",
+    "usage": "Windows static HTTP compression dependency; Linux uses system zlib; SourcePawn keeps its own vendored copy"
+  },
+  "vcpkg": {
+    "repository": "https://github.com/microsoft/vcpkg.git",
+    "revision": "40a9bd4ccdf5dc14ff76d4ed47d46a226ce84a83",
+    "triplet": "x64-source2root-windows",
+    "ports": [
+      "openssl",
+      "zlib"
+    ],
+    "usage": "Windows external library build recipes; corresponding patched sources are included with packages",
+    "triplet_recipe": "cmake/triplets/x64-source2root-windows.cmake"
   }
 }

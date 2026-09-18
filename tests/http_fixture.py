@@ -36,6 +36,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/binary":
             output = b"A\0\xffZ"
+        elif path == "/crl":
+            output = self.server.crl
+            headers += [("Content-Type", "application/pkix-crl")]
         elif path == "/echo":
             output = body
             headers += [("X-Method", self.command), ("X-Request-Type", self.headers.get("Content-Type", ""))]
@@ -97,24 +100,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
     do_GET = do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = handle_request
 
 
-def certificate(root, name, ca=None, san=None):
+def certificate(root, name, ca=None, san=None, openssl="openssl", crl_url=None):
     key, pem = root / f"{name}.key", root / f"{name}.pem"
-    run = lambda args: subprocess.run(["openssl", *args], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run = lambda args: subprocess.run([openssl, *args], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if ca is None:
         run(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(pem),
-             "-subj", f"/CN=Source2Root-{name}", "-days", "2", "-addext", "basicConstraints=critical,CA:TRUE"])
+             "-subj", f"/CN=Source2Root-{name}", "-days", "2", "-addext", "basicConstraints=critical,CA:TRUE",
+             "-addext", "keyUsage=critical,keyCertSign,cRLSign"])
     else:
         csr, ext = root / f"{name}.csr", root / f"{name}.ext"
-        ext.write_text(f"subjectAltName={san}\nextendedKeyUsage=serverAuth\n")
+        extensions = f"subjectAltName={san}\nextendedKeyUsage=serverAuth\n"
+        if crl_url:
+            extensions += f"crlDistributionPoints=URI:{crl_url}\n"
+        ext.write_text(extensions)
         run(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(csr), "-subj", "/CN=localhost"])
         run(["x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(ca.with_suffix('.key')),
              "-CAcreateserial", "-out", str(pem), "-days", "2", "-extfile", str(ext)])
     return pem, key
 
 
+def revocations(root, ca, openssl):
+    index, config = root / "index.txt", root / "ca.cnf"
+    index.write_text("")
+    config.write_text("[ca]\ndefault_ca=fixture\n[fixture]\n"
+        f'database="{index.as_posix()}"\ncertificate="{ca.as_posix()}"\n'
+        f'private_key="{ca.with_suffix(".key").as_posix()}"\n'
+        "default_md=sha256\ndefault_crl_days=2\n")
+    pem, der = root / "ca.crl.pem", root / "ca.crl"
+    for args in (["ca", "-gencrl", "-batch", "-config", str(config), "-out", str(pem)],
+                 ["crl", "-in", str(pem), "-outform", "DER", "-out", str(der)]):
+        subprocess.run([openssl, *args], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return der.read_bytes()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
+    parser.add_argument("--openssl", default="openssl")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
@@ -123,12 +145,16 @@ def main():
     Path(args.root).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="http-", dir=args.root) as directory:
         root = Path(directory)
-        ca, _ = certificate(root, "ca")
-        bad_ca, _ = certificate(root, "bad-ca")
-        valid, valid_key = certificate(root, "server", ca, "DNS:localhost,IP:127.0.0.1")
-        wrong, wrong_key = certificate(root, "wrong", ca, "DNS:wrong.invalid")
-        (root / "upload.bin").write_bytes(b"file\0\xffpayload")
         servers = [Server(("127.0.0.1", 0), Handler) for _ in range(4)]
+        ca, _ = certificate(root, "ca", openssl=args.openssl)
+        bad_ca, _ = certificate(root, "bad-ca", openssl=args.openssl)
+        crl_url = f"http://127.0.0.1:{servers[0].server_port}/crl"
+        crl = revocations(root, ca, args.openssl)
+        for server in servers:
+            server.crl = crl
+        valid, valid_key = certificate(root, "server", ca, "DNS:localhost,IP:127.0.0.1", args.openssl, crl_url)
+        wrong, wrong_key = certificate(root, "wrong", ca, "DNS:wrong.invalid", args.openssl, crl_url)
+        (root / "upload.bin").write_bytes(b"file\0\xffpayload")
         for server, cert, key in [(servers[2], valid, valid_key), (servers[3], wrong, wrong_key)]:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.minimum_version = ssl.TLSVersion.TLSv1_2

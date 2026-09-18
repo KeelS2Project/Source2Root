@@ -24,6 +24,9 @@ acquired at revisions in `dependencies.lock.json` and retain their own notices.
   for its bundled components. It is built as a separate shared library. Preserve
   COPYING.LIB, source notices and corresponding buildable source when distributing
   it. TLS uses the platform TLS library (OpenSSL on Linux, Schannel on Windows).
+  `cmake/prepare_mariadb.py` stages a marked local change requiring hostname
+  and certificate trust verification for every TLS connection, including
+  loopback, without the connector's password-authentication fallback.
 * libmaxminddb: Apache-2.0. Only the reader library is included; production
   GeoIP databases are separate inputs with their own terms.
 * PCRE2 retains its BSD license and the notices for bundled components,
@@ -33,6 +36,13 @@ acquired at revisions in `dependencies.lock.json` and retain their own notices.
   per-file notices. The pinned Meson build tool retains its Apache-2.0 license.
   Our private libpq copy adds the marked Apache-2.0 TLS BIO-method cleanup in
   `cmake/libpq_tls_cleanup.c` for extension unload after all connections close.
+* Windows extension packages statically link OpenSSL (Apache-2.0) for libpq
+  and zlib (Zlib license) for HTTP compression. Their actual patched source
+  trees and notices accompany the packages. The pinned vcpkg recipes retain
+  their MIT license and per-file notices; the sources identify the selected
+  ports and `x64-source2root-windows` triplet in `dependencies.lock.json`.
+  `cmake/openssl_buildinfo.patch` marks our change to remove private build
+  directories from OpenSSL's embedded compiler diagnostic metadata.
 
 Optional extension distributions include the actual dependency source inputs,
 their per-file hashes, a CMake source-selection file and copied upstream license

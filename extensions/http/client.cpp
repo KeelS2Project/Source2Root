@@ -1,6 +1,7 @@
 #include "client.h"
 #include <curl/curl.h>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <exception>
 #include <fstream>
@@ -171,9 +172,11 @@ Response Client::Perform(Request request, const std::function<bool()>& canceled)
         // Input lists/forms outlive easy-handle cleanup, including error paths.
         Headers headers(nullptr, curl_slist_free_all);
         Mime mime(nullptr, curl_mime_free);
+        std::array<char, CURL_ERROR_SIZE> detail{};
         Easy easy(curl_easy_init(), curl_easy_cleanup); Multi multi(curl_multi_init(), curl_multi_cleanup);
         if (!easy || !multi) throw Error("HTTP transfer allocation failed.");
         auto set = [&](CURLoption option, auto value) { Curl(curl_easy_setopt(easy.get(), option, value)); };
+        set(CURLOPT_ERRORBUFFER, detail.data());
         set(CURLOPT_URL, address.normalized.c_str()); set(CURLOPT_PROTOCOLS_STR, "http,https");
         set(CURLOPT_FOLLOWLOCATION, 0L); set(CURLOPT_PROXY, ""); set(CURLOPT_NETRC, static_cast<long>(CURL_NETRC_IGNORED));
         set(CURLOPT_NOSIGNAL, 1L); set(CURLOPT_SSL_VERIFYPEER, 1L); set(CURLOPT_SSL_VERIFYHOST, 2L);
@@ -219,6 +222,8 @@ Response Client::Perform(Request request, const std::function<bool()>& canceled)
         } while (running);
         int pending = 0; auto* message = curl_multi_info_read(multi.get(), &pending);
         if (!message || message->msg != CURLMSG_DONE) throw Error("HTTP transfer completion is missing.");
+        if (message->data.result != CURLE_OK && detail.front())
+            throw Error("HTTP transfer failed: " + std::string(detail.data()));
         Curl(message->data.result); operation.Check();
         long status = 0; Curl(curl_easy_getinfo(easy.get(), CURLINFO_RESPONSE_CODE, &status));
         operation.response.status = status; operation.response.url = address.normalized;
