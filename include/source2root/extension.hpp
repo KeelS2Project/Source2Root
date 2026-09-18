@@ -2,6 +2,7 @@
 
 #include <source2root/extension.h>
 #include <source2root/native.hpp>
+#include <source2root/callbacks.h>
 #include <keels2/authoring.hpp>
 #include <keels2/services.hpp>
 #include <algorithm>
@@ -19,7 +20,7 @@ namespace source2root {
 class Extension : public keels2::Plugin {
 public:
     bool Load() final {
-        if (api_ || native_api_ || publication_ || queried_ || native_queried_) return false;
+        if (api_ || native_api_ || callback_api_ || publication_ || queried_ || native_queried_ || callback_queried_) return false;
         ready_ = false;
         bindings_.clear();
         try {
@@ -92,6 +93,29 @@ protected:
     KeelResult CancelCallback(SrCallback callback) {
         if (!native_api_) return KEEL_RESULT_NOT_READY;
         return native_api_->cancel_callback(native_api_->context, HostContext().PluginHandle(), callback);
+    }
+    KeelResult RetainCallback(SrCallback callback) {
+        if (!ready_) return KEEL_RESULT_NOT_READY;
+        if (!callback_api_) {
+            if (callback_queried_) return KEEL_RESULT_INCOMPATIBLE;
+            const void* raw = nullptr;
+            const auto result = HostContext().QueryService(SR_CALLBACK_SERVICE,SR_CALLBACK_API_VERSION,&raw);
+            if (result != KEEL_RESULT_OK) return result;
+            callback_queried_ = true;
+            const auto* api = static_cast<const SrCallbackApi*>(raw);
+            if (!api || api->size != sizeof(*api) || api->api_version != SR_CALLBACK_API_VERSION ||
+                !api->retain || !api->invoke || !api->cancel) return KEEL_RESULT_INCOMPATIBLE;
+            callback_api_ = api;
+        }
+        return callback_api_->retain(callback_api_->context,HostContext().PluginHandle(),callback);
+    }
+    KeelResult InvokeCallback(SrCallback callback, const std::vector<SrCallbackArgument>& arguments,
+                              std::int32_t& result) {
+        result = 0;
+        if (!ready_ || !callback_api_) return KEEL_RESULT_NOT_READY;
+        if (arguments.size() > SR_CALLBACK_MAX_ARGUMENTS) return KEEL_RESULT_INVALID_ARGUMENT;
+        return callback_api_->invoke(callback_api_->context,HostContext().PluginHandle(),callback,
+            arguments.data(),static_cast<std::uint32_t>(arguments.size()),&result);
     }
     KeelResult PlayerSnapshot(std::vector<SrPlayerIdentity>& players) {
         players.clear();
@@ -244,6 +268,11 @@ private:
             if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
             native_queried_ = false;
         }
+        if (callback_queried_) {
+            const auto result = services_.Release(SR_CALLBACK_SERVICE,SR_CALLBACK_API_VERSION);
+            if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
+            callback_queried_ = false;
+        }
         if (queried_) {
             const auto result = services_.Release(SR_EXTENSION_SERVICE, SR_EXTENSION_API_VERSION);
             if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
@@ -252,6 +281,7 @@ private:
         ready_ = false;
         api_ = nullptr;
         native_api_ = nullptr;
+        callback_api_ = nullptr;
         bindings_.clear();
         return true;
     }
@@ -264,6 +294,8 @@ private:
     keels2::services::Service services_;
     const SrExtensionApi* api_ = nullptr;
     const SrNativeApi* native_api_ = nullptr;
+    const SrCallbackApi* callback_api_ = nullptr;
+    bool callback_queried_ = false;
     KeelServiceHandle publication_ = 0;
     std::vector<std::unique_ptr<Binding>> bindings_;
 };

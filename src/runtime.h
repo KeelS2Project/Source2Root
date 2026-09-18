@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sp_vm_api.h>
+#include <source2root/callbacks.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -52,6 +53,21 @@ public:
               std::function<Cell(const Arguments&)> callback, int maximum = -1);
     bool Invoke(const std::string& id, SourcePawn::IPluginFunction* function,
                 const std::vector<Cell>& cells, const char* text, Cell& result);
+    class CallbackArguments {
+    public:
+        CallbackArguments(const SrCallbackArgument* arguments, std::uint32_t count);
+        bool Push(SourcePawn::IPluginFunction& function);
+        void Commit() const;
+    private:
+        struct Value {
+            SrCallbackArgument argument;
+            std::vector<Cell> cells;
+            std::string text;
+        };
+        std::vector<Value> values_;
+    };
+    bool Invoke(const std::string& id, SourcePawn::IPluginFunction* function,
+                CallbackArguments& arguments, Cell& result);
     bool Idle() const { return depth_ == 0; }
 private:
     void* library_ = nullptr;
@@ -59,6 +75,8 @@ private:
     Log log_;
     std::string current_;
     unsigned depth_ = 0;
+    bool Execute(const std::string& id, SourcePawn::IPluginFunction* function,
+                 const std::function<bool()>& push, Cell& result);
     void OnDebugSpew(const char*, ...) override;
     void ReportError(const SourcePawn::IErrorReport& report, SourcePawn::IFrameIterator& frames) override;
 };

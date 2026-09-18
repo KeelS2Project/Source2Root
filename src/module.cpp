@@ -71,6 +71,9 @@ public:
                 &DeliverCallback, &CancelCallback, &PlayerSnapshot, &MenuStatus, &ConsumerStatus};
             if (services_.Publish(SR_NATIVE_SERVICE, SR_NATIVE_API_VERSION, &native_api_, native_publication_) != KEEL_RESULT_OK)
                 throw std::runtime_error("could not publish native call API");
+            callback_api_ = {sizeof(callback_api_),SR_CALLBACK_API_VERSION,this,&RetainCallback,&InvokeCallback,&CancelCallback};
+            if (services_.Publish(SR_CALLBACK_SERVICE,SR_CALLBACK_API_VERSION,&callback_api_,callback_publication_) != KEEL_RESULT_OK)
+                throw std::runtime_error("could not publish persistent callback API");
             if (!CreateCommand("sr", "Source2Root management", &Source2Root::Manage) ||
                 !CreateCommand("sr_menu", "Menu input: up/down/select/back [session]", &Source2Root::MenuCommand,
                     FCVAR_CLIENT_CAN_EXECUTE | FCVAR_GAMEDLL))
@@ -99,6 +102,11 @@ public:
     bool PrepareUnload() override {
         if (runtime_.CheckGameThread() != KEEL_RESULT_OK || !foundation_) return !foundation_;
         if (!foundation_->Shutdown()) return false;
+        if (callback_publication_) {
+            const auto result = services_.Withdraw(callback_publication_);
+            if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
+            callback_publication_ = 0;
+        }
         if (native_publication_) {
             const auto result = services_.Withdraw(native_publication_);
             if (result != KEEL_RESULT_OK && result != KEEL_RESULT_NOT_FOUND) return false;
@@ -425,6 +433,8 @@ private:
     keels2::source2::NativeRuntime runtime_;
     SrExtensionApi api_{};
     SrNativeApi native_api_{};
+    SrCallbackApi callback_api_{};
+    KeelServiceHandle callback_publication_ = 0;
     KeelServiceHandle native_publication_ = 0;
     KeelServiceHandle publication_ = 0;
     std::string last_menu_error_;
@@ -695,6 +705,14 @@ private:
     }
     static KeelResult CancelCallback(void* context, KeelPluginHandle owner, SrCallback callback) {
         return Call(context, [&](auto& core) { return core.CancelCallback(owner, callback); }, true);
+    }
+    static KeelResult RetainCallback(void* context, KeelPluginHandle owner, SrCallback callback) {
+        return Call(context,[&](auto& core) { return core.RetainCallback(owner,callback); });
+    }
+    static KeelResult InvokeCallback(void* context, KeelPluginHandle owner, SrCallback callback,
+        const SrCallbackArgument* arguments, std::uint32_t count, std::int32_t* result) {
+        if (result) *result = 0;
+        return Call(context,[&](auto& core) { return core.InvokeCallback(owner,callback,arguments,count,result); });
     }
     static KeelResult PlayerSnapshot(void* context, SrPlayerIdentity* players, std::uint32_t capacity, std::uint32_t* count) {
         return Call(context, [&](auto& core) { return core.NativePlayerSnapshot(players, capacity, count); });

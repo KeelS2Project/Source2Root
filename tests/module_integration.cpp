@@ -216,6 +216,41 @@ int main(int argc, char** argv) {
             std::cout << messages() << "stock KeelS2 missing-unload-service limitation reproduced\n";
             return 0;
         }
+        if (argc == 12 && std::string(argv[10]) == "persistent") {
+            const auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned found = 0; std::size_t offset = 0;
+                while ((offset = log.find(value, offset)) != std::string::npos) { ++found; offset += std::strlen(value); }
+                return found;
+            };
+            Check(occurrences("PERSISTENT_STORED_OK") == 1,"persistent service acquired at script startup");
+            run("sr_persistent_module"); frame(); frame();
+            Check(occurrences("PERSISTENT_NESTED_OK") == 1 && occurrences("PERSISTENT_FRAME_OK") == 2,
+                "callbacks repeat from native reentry and idle host frames");
+            run("keel plugins unload 2");
+            Check(contains("plugin unload is blocked"),"script lease retains callback provider");
+            run("sr plugins pause hello"); frame();
+            Check(occurrences("PERSISTENT_FRAME_OK") == 2 && occurrences("PERSISTENT_PAUSED_OK") == 1,
+                "paused callback is retained without execution");
+            run("sr plugins resume hello"); frame();
+            Check(occurrences("PERSISTENT_FRAME_OK") == 3,"resume reuses persistent token");
+            run("sr plugins reload hello"); run("sr_persistent_module"); frame();
+            Check(occurrences("PERSISTENT_STORED_OK") == 2 && occurrences("PERSISTENT_CLEANUP_OK") == 1 &&
+                occurrences("PERSISTENT_NESTED_OK") == 2 && occurrences("PERSISTENT_FRAME_OK") == 4,
+                "staged reload replaces token and cleans old generation before provider release");
+            run("sr plugins unload hello"); frame();
+            Check(occurrences("PERSISTENT_CLEANUP_OK") == 2 && occurrences("PERSISTENT_FRAME_OK") == 4,
+                "unloaded script stops frame callbacks");
+            run("keel plugins unload 2"); run("keel plugins load sr_example");
+            run("sr plugins load hello"); run("sr_persistent_module"); frame();
+            Check(occurrences("PERSISTENT_STORED_OK") == 3 && occurrences("PERSISTENT_NESTED_OK") == 3 &&
+                occurrences("PERSISTENT_FRAME_OK") == 5,"provider reload reacquires callback service and rebinds natives");
+            run("sr plugins unload hello");
+            Check(stop(),"persistent callback service lease released on host shutdown");
+            Check(network_stop(),"persistent callback fixture teardown");
+            Check(occurrences("PERSISTENT_CLEANUP_OK") == 3 && !contains("PERSISTENT_FAILED"),"persistent lifecycle has no failures");
+            std::cout << messages() << "Persistent callback module lifecycle passed\n";
+            return 0;
+        }
         if (argc == 12 && std::string(argv[10]) == "http") {
             const auto occurrences = [&](const char* value) {
                 const std::string log = messages(); unsigned found = 0; std::size_t offset = 0;

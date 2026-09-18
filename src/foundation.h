@@ -112,6 +112,9 @@ public:
     KeelResult DeliverCallback(KeelPluginHandle owner, SrCallback callback,
         const Cell* cells, std::uint32_t count, const char* text);
     KeelResult CancelCallback(KeelPluginHandle owner, SrCallback callback);
+    KeelResult RetainCallback(KeelPluginHandle owner, SrCallback callback);
+    KeelResult InvokeCallback(KeelPluginHandle owner, SrCallback callback,
+        const SrCallbackArgument* arguments, std::uint32_t count, Cell* result);
     KeelResult NativePlayerSnapshot(SrPlayerIdentity* players, std::uint32_t capacity, std::uint32_t* count);
     KeelResult NativeConsumerStatus(KeelPluginHandle provider, std::uint64_t owner);
     KeelResult OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerConnection& player,
@@ -196,9 +199,11 @@ private:
         Script* script;
         KeelPluginHandle provider;
         SourcePawn::IPluginFunction* function;
+        bool persistent = false;
     };
     std::map<SrCallback, ExtensionCallback> callbacks_;
     SrCallback next_callback_ = 1;
+    unsigned callback_depth_ = 0;
     Cell InvokeContextNative(Script& script, Provider& provider, const Arguments& args);
     struct NativeDisplay {
         std::uint64_t session;

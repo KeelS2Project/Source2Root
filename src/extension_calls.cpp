@@ -267,6 +267,7 @@ KeelResult Foundation::DeliverCallback(KeelPluginHandle owner, SrCallback token,
     if (found == callbacks_.end()) return KEEL_RESULT_NOT_FOUND;
     const auto callback = found->second;
     if (callback.provider != owner) return KEEL_RESULT_INVALID_ARGUMENT;
+    if (callback.persistent) return KEEL_RESULT_INVALID_ARGUMENT;
     auto& script = *callback.script;
     if (script.state != PluginState::Running && script.state != PluginState::Loading && script.state != PluginState::Paused) {
         CancelCallback(owner, token);
@@ -277,6 +278,65 @@ KeelResult Foundation::DeliverCallback(KeelPluginHandle owner, SrCallback token,
     if (count) arguments.assign(cells, cells + count);
     CancelCallback(owner, token);
     return Invoke(script, callback.function, arguments, text) ? KEEL_RESULT_OK : KEEL_RESULT_ENGINE_FAILURE;
+}
+
+KeelResult Foundation::RetainCallback(KeelPluginHandle owner, SrCallback token) {
+    Thread();
+    if (!owner || !token) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto found = callbacks_.find(token);
+    if (found == callbacks_.end()) return KEEL_RESULT_NOT_FOUND;
+    if (found->second.provider != owner) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto state = found->second.script->state;
+    if (state != PluginState::Running && state != PluginState::Loading && state != PluginState::Paused) {
+        CancelCallback(owner,token);
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    found->second.persistent = true;
+    return KEEL_RESULT_OK;
+}
+
+KeelResult Foundation::InvokeCallback(KeelPluginHandle owner, SrCallback token,
+    const SrCallbackArgument* arguments, std::uint32_t count, Cell* output) {
+    if (output) *output = 0;
+    Thread();
+    if (!owner || !token || !output) return KEEL_RESULT_INVALID_ARGUMENT;
+    const auto found = callbacks_.find(token);
+    if (found == callbacks_.end()) return KEEL_RESULT_NOT_FOUND;
+    const auto callback = found->second;
+    if (callback.provider != owner || !callback.persistent) return KEEL_RESULT_INVALID_ARGUMENT;
+    auto& script = *callback.script;
+    if (script.state != PluginState::Running && script.state != PluginState::Loading && script.state != PluginState::Paused) {
+        CancelCallback(owner,token);
+        return KEEL_RESULT_NOT_FOUND;
+    }
+    if (managing_ || script.state != PluginState::Running || callback_depth_ >= SR_CALLBACK_MAX_DEPTH) return KEEL_RESULT_BUSY;
+    std::optional<PawnRuntime::CallbackArguments> prepared;
+    try { prepared.emplace(arguments,count); }
+    catch (const NativeError&) { return KEEL_RESULT_INVALID_ARGUMENT; }
+    struct Active {
+        Script& script;
+        unsigned& depth;
+        Cell previous_player;
+        ~Active() {
+            script.callback_player = previous_player;
+            if (!--script.active) script.self_kicks.clear();
+            --depth;
+        }
+    } active{script,callback_depth_,script.callback_player};
+    ++script.active; ++callback_depth_; script.callback_player = 0;
+    Cell result = 0;
+    bool success = false;
+    try { success = runtime_.Invoke(script.manifest.id,callback.function,*prepared,result); }
+    catch (...) {}
+    if (!success) {
+        CancelCallback(owner,token);
+        CancelMap(script.owner);
+        script.error = "script callback failed; see stack in platform log";
+        if (++script.faults >= 3) script.state = PluginState::Retiring;
+        return KEEL_RESULT_ENGINE_FAILURE;
+    }
+    *output = result;
+    return KEEL_RESULT_OK;
 }
 
 }

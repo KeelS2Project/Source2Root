@@ -157,7 +157,7 @@ def main():
     for name in ("admins.cfg", "admin_groups.cfg", "allowed_maps.txt", "map_menu.txt"):
         copy(ROOT / "configs" / name, runtime / "addons/source2root/configs" / name)
     tree(output / "sdk", developer / "sdk")
-    for header in ("extension.h", "extension.hpp", "native.h", "native.hpp", "work_queue.hpp"):
+    for header in ("extension.h", "extension.hpp", "native.h", "native.hpp", "callbacks.h", "work_queue.hpp"):
         copy(ROOT / "include/source2root" / header, developer / "sdk/include/source2root" / header)
     copy(binaries / (module_prefix + "source2root_random" + SUFFIX),
          developer / "extensions" / PLATFORM / ("source2root_random" + SUFFIX))

@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <bit>
 #include <fstream>
 #include <limits>
 #include <smx/smx-v1.h>
@@ -252,21 +253,107 @@ void PawnRuntime::Bind(SourcePawn::IPluginRuntime& vm, const char* name, int arg
 
 bool PawnRuntime::Invoke(const std::string& id, SourcePawn::IPluginFunction* function,
                          const std::vector<Cell>& cells, const char* text, Cell& result) {
+    return Execute(id,function,[&] {
+        for (auto value : cells) if (function->PushCell(value) != SP_ERROR_NONE) return false;
+        return !text || function->PushString(text) == SP_ERROR_NONE;
+    },result);
+}
+
+bool PawnRuntime::Execute(const std::string& id, SourcePawn::IPluginFunction* function,
+                          const std::function<bool()>& push, Cell& result) {
+    result = 0;
     if (!function) return false;
-    const auto previous = current_;
-    current_ = id;
-    ++depth_;
-    bool pushed = true;
-    for (auto value : cells) pushed = pushed && function->PushCell(value) == SP_ERROR_NONE;
-    if (text) pushed = pushed && function->PushString(text) == SP_ERROR_NONE;
+    struct Active {
+        PawnRuntime& runtime;
+        std::string previous;
+        ~Active() { --runtime.depth_; runtime.current_.swap(previous); }
+    } active{*this,id};
+    current_.swap(active.previous); ++depth_;
     int error = SP_ERROR_PARAM;
-    if (pushed) error = function->Execute(&result);
-    else function->Cancel();
-    --depth_;
-    current_ = previous;
+    try {
+        if (push()) error = function->Execute(&result);
+        else function->Cancel();
+    } catch (...) {
+        function->Cancel();
+        result = 0;
+        return false;
+    }
     if (error != SP_ERROR_NONE)
         log_(id + ": callback failed: " + environment_->APIv2()->GetErrorString(error));
     return error == SP_ERROR_NONE;
+}
+
+PawnRuntime::CallbackArguments::CallbackArguments(const SrCallbackArgument* arguments, std::uint32_t count) {
+    if (count > SR_CALLBACK_MAX_ARGUMENTS || (count && !arguments)) throw NativeError("Invalid callback arguments.");
+    values_.reserve(count);
+    std::size_t payload = 0;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const auto& argument = arguments[i];
+        const auto type = argument.type;
+        const bool array = type == SR_CALLBACK_INT32_ARRAY || type == SR_CALLBACK_FLOAT32_ARRAY;
+        const bool reference = type == SR_CALLBACK_INT32_REF || type == SR_CALLBACK_FLOAT32_REF;
+        if (argument.size != sizeof(argument) || type < SR_CALLBACK_INT32 || type > SR_CALLBACK_FLOAT32_ARRAY ||
+            (array ? argument.flags & ~SR_CALLBACK_COPYBACK : argument.flags) ||
+            (array ? !argument.count || argument.count > SR_CALLBACK_MAX_ARRAY : reference ? argument.count != 1 : argument.count != 0))
+            throw NativeError("Invalid callback argument descriptor.");
+        Value value{argument,{}, {}};
+        if (type == SR_CALLBACK_STRING) {
+            if (!argument.value.string) throw NativeError("Missing callback string.");
+            std::size_t length = 0;
+            while (length < SR_NATIVE_BUFFER_LIMIT && argument.value.string[length]) ++length;
+            if (length == SR_NATIVE_BUFFER_LIMIT) throw NativeError("Callback string exceeds limit.");
+            payload += length + 1;
+            if (payload > SR_CALLBACK_MAX_PAYLOAD) throw NativeError("Callback payload exceeds limit.");
+            value.text.assign(argument.value.string,length);
+        } else if (array || reference) {
+            const bool real = type == SR_CALLBACK_FLOAT32_ARRAY || type == SR_CALLBACK_FLOAT32_REF;
+            if (real ? !argument.value.reals : !argument.value.integers) throw NativeError("Missing callback buffer.");
+            payload += static_cast<std::size_t>(argument.count) * sizeof(Cell);
+            if (payload > SR_CALLBACK_MAX_PAYLOAD) throw NativeError("Callback payload exceeds limit.");
+            value.cells.reserve(argument.count);
+            for (std::uint32_t j = 0; j < argument.count; ++j)
+                value.cells.push_back(real ? std::bit_cast<Cell>(argument.value.reals[j]) : argument.value.integers[j]);
+        }
+        values_.push_back(std::move(value));
+    }
+}
+
+bool PawnRuntime::CallbackArguments::Push(SourcePawn::IPluginFunction& function) {
+    for (auto& value : values_) {
+        const auto& argument = value.argument;
+        int status;
+        switch (argument.type) {
+            case SR_CALLBACK_INT32: status = function.PushCell(argument.value.integer); break;
+            case SR_CALLBACK_FLOAT32: status = function.PushFloat(argument.value.real); break;
+            case SR_CALLBACK_STRING: status = function.PushString(value.text.c_str()); break;
+            case SR_CALLBACK_INT32_REF:
+            case SR_CALLBACK_FLOAT32_REF: status = function.PushCellByRef(value.cells.data()); break;
+            default: status = function.PushArray(value.cells.data(),argument.count,
+                argument.flags & SR_CALLBACK_COPYBACK ? SM_PARAM_COPYBACK : 0); break;
+        }
+        if (status != SP_ERROR_NONE) return false;
+    }
+    return true;
+}
+
+void PawnRuntime::CallbackArguments::Commit() const {
+    for (const auto& value : values_) {
+        const auto& argument = value.argument;
+        const bool reference = argument.type == SR_CALLBACK_INT32_REF || argument.type == SR_CALLBACK_FLOAT32_REF;
+        if (!reference && !(argument.flags & SR_CALLBACK_COPYBACK)) continue;
+        const bool real = argument.type == SR_CALLBACK_FLOAT32_REF || argument.type == SR_CALLBACK_FLOAT32_ARRAY;
+        for (std::uint32_t i = 0; i < argument.count; ++i) {
+            if (real) argument.value.reals[i] = std::bit_cast<float>(value.cells[i]);
+            else argument.value.integers[i] = value.cells[i];
+        }
+    }
+}
+
+bool PawnRuntime::Invoke(const std::string& id, SourcePawn::IPluginFunction* function,
+                         CallbackArguments& arguments, Cell& result) {
+    const bool success = Execute(id,function,[&] { return arguments.Push(*function); },result);
+    if (success) arguments.Commit();
+    return success;
 }
 
 void PawnRuntime::OnDebugSpew(const char*, ...) {}
