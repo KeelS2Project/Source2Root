@@ -23,8 +23,8 @@ struct Registration {
     unsigned active = 0;
     bool closing = false, enabled = true;
 };
-Target::Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data, bool allow_calls)
-    : service_(std::move(service)), data_(std::move(data)), allow_calls_(allow_calls) {}
+Target::Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data, Definition definition)
+    : service_(std::move(service)), data_(std::move(data)), definition_(std::move(definition)) {}
 Hook::Hook(std::shared_ptr<Service> service, std::shared_ptr<Registration> registration)
     : service_(std::move(service)), registration_(std::move(registration)) {}
 Hook::~Hook() { if (registration_) service_->Close(*registration_); }
@@ -54,7 +54,7 @@ std::unique_ptr<Target> Service::Open(const Definition& definition) {
     Thread(); Collect(); Validate(definition);
     if (targets_.size() >= 64) throw Error("Hook target limit (64) reached.");
     auto data = std::make_shared<TargetData>(); data->definition = definition;
-    auto result = std::unique_ptr<Target>(new Target(shared_from_this(),data,definition.allow_calls));
+    auto result = std::unique_ptr<Target>(new Target(shared_from_this(),data,definition));
     const KeelHookTargetSpec spec{sizeof(spec),definition.source,KH_MECHANISM_DETOUR,
         definition.method ? KH_TARGET_METHOD : 0u,definition.module.empty() ? nullptr : definition.module.c_str(),
         definition.symbol.empty() ? nullptr : definition.symbol.c_str(),definition.pattern.empty() ? nullptr : definition.pattern.c_str(),
@@ -79,16 +79,44 @@ std::unique_ptr<Target> Service::Open(const Definition& definition) {
 std::unique_ptr<Call> Service::Prepare(const Target& target) {
     Thread();
     if (!calls_.invoke) throw Error("Direct-call host service is unavailable.");
-    if (target.service_.get() != this || !target.allow_calls_) throw Error("This configured target does not allow direct calls.");
-    if (target.data_->definition.method) throw Error("Script method calls require a future checked object-pointer adapter.");
-    return std::unique_ptr<Call>(new Call(shared_from_this(),target.data_,target.data_->definition));
+    if (target.service_.get() != this || !target.definition_.allow_calls) throw Error("This configured target does not allow direct calls.");
+    if (target.definition_.method) throw Error("Script method calls require a future checked object-pointer adapter.");
+    return std::unique_ptr<Call>(new Call(shared_from_this(),target.data_,target.definition_));
 }
-void Service::Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments, KeelHookValue& result) {
+void Service::Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments,
+    const std::vector<BufferSpec>& bounds, KeelHookValue& result) {
     Thread();
     if (!calls_.invoke) throw Error("Direct-call host service is unavailable.");
+    active_buffers_.push_back({target.handle,&arguments,&bounds});
+    struct Scope { std::vector<BufferScope>& values; ~Scope() { values.pop_back(); } } scope{active_buffers_};
     Check(calls_.invoke(owner_,target.handle,flags,arguments.data(),static_cast<unsigned>(arguments.size()),&result),"Invoke configured target");
     if (result.type != target.definition.result || result.reserved ||
         (result.type == KH_VALUE_BOOL && result.scalar.boolean > 1)) throw Error("Invalid direct-call result from host.");
+}
+void Service::CheckBufferEdits(const KeelHookFrame& before, const Frame& after) const {
+    if (before.phase != KH_PHASE_PRE) return;
+    for (const auto& active : active_buffers_) {
+        if (active.target != before.target) continue;
+        for (const auto& bound : *active.bounds) {
+            const auto pointer = (*active.arguments)[bound.argument - 1].scalar.pointer;
+            for (unsigned slot = 1; slot <= after.Count(); ++slot) {
+                const auto& value = after.Value(slot);
+                if (value.type == KH_VALUE_POINTER && value.scalar.pointer == pointer && slot != bound.argument)
+                    throw Error("Hook cannot alias owned SDKCall buffer pointers into other arguments.");
+            }
+            // A native function can recursively call the target with its own
+            // memory. Protect only frames that still reference this allocation.
+            if (before.arguments[bound.argument - 1].scalar.pointer != pointer) continue;
+            if (after.Value(bound.argument).scalar.pointer != pointer)
+                throw Error("Hook cannot replace an owned SDKCall buffer pointer.");
+            if (bound.length_argument) {
+                const auto& value = after.Value(bound.length_argument);
+                if ((value.type == KH_VALUE_INT32 && (value.scalar.int32 < 0 || static_cast<unsigned>(value.scalar.int32) > bound.capacity)) ||
+                    (value.type == KH_VALUE_UINT32 && value.scalar.uint32 > bound.capacity))
+                    throw Error("Hook length exceeds the owned SDKCall buffer allocation.");
+            }
+        }
+    }
 }
 std::unique_ptr<Hook> Service::Attach(const Target& target, unsigned phases, std::int32_t priority,
     Callback callback, std::function<void()> retire) {
@@ -164,6 +192,7 @@ KeelHookAction Service::Dispatch(KeelHookFrame* frame, void* raw) noexcept {
         if (action == -2) self->Close(*registration);
         if (action < 0 || action > KH_ACTION_SUPERSEDE || (snapshot.Phase() == KH_PHASE_POST && action == KH_ACTION_SUPERSEDE))
             return KH_ACTION_CONTINUE;
+        self->CheckBufferEdits(*frame,snapshot);
         snapshot.Commit(*frame,static_cast<unsigned>(action));
         return static_cast<KeelHookAction>(action);
     } catch (...) { return KH_ACTION_CONTINUE; }

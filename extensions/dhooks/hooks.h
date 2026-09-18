@@ -1,6 +1,7 @@
 #pragma once
 #include <keels2/keelcall.h>
 #include <keels2/native_runtime.h>
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -10,6 +11,11 @@
 
 namespace source2root::dhooks {
 class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
+enum class BufferKind { string, int32, vector3 };
+struct BufferSpec {
+    unsigned argument = 0, capacity = 0, length_argument = 0;
+    BufferKind kind = BufferKind::string;
+};
 struct Definition {
     unsigned source = 0, result = KH_VALUE_VOID;
     bool method = false, allow_calls = false;
@@ -17,6 +23,7 @@ struct Definition {
     std::int64_t offset = 0;
     unsigned occurrence = 0;
     std::vector<KeelHookValueType> arguments;
+    std::vector<BufferSpec> buffers;
 };
 Definition ReadDefinition(const std::filesystem::path& file, const std::string& name, const std::string& script);
 void Validate(const Definition& definition);
@@ -65,13 +72,14 @@ public:
     Target& operator=(const Target&) = delete;
 private:
     friend class Service;
-    Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data, bool allow_calls);
+    Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data, Definition definition);
     std::shared_ptr<Service> service_;
     std::shared_ptr<TargetData> data_;
-    bool allow_calls_;
+    Definition definition_;
 };
 
-// Reusable owned scalar call. All arguments must be explicitly initialized.
+// Reusable owned call. All arguments must be initialized; buffer lengths are
+// supplied by their associated buffer setters.
 // Internal shared state survives resource closure from a nested callback.
 class Call final {
 public:
@@ -86,12 +94,22 @@ public:
     void SetNumber(unsigned slot, float value);
     void SetNumberText(unsigned slot, const std::string& value);
     void SetNull(unsigned slot);
+    void SetString(unsigned slot, const std::string& value, unsigned capacity = 0);
+    std::string String(unsigned slot) const;
+    void SetArray(unsigned slot, const std::vector<std::int32_t>& value);
+    std::vector<std::int32_t> Array(unsigned slot) const;
+    void SetVector(unsigned slot, const std::array<float, 3>& value);
+    std::array<float, 3> Vector(unsigned slot) const;
     void Reset();
     void Execute(unsigned flags);
 private:
     friend class Service;
     Call(std::shared_ptr<Service> service, std::shared_ptr<TargetData> target, const Definition& definition);
     template<class Function> void Edit(unsigned slot, Function function);
+    struct Buffer;
+    Buffer& WritableBuffer(unsigned slot, BufferKind kind);
+    const Buffer& ReadBuffer(unsigned slot, BufferKind kind) const;
+    void CommitBuffer(Buffer& buffer, Buffer value);
     struct State;
     std::shared_ptr<State> state_;
 };
@@ -129,7 +147,9 @@ public:
 private:
     friend class Hook;
     friend class Call;
-    void Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments, KeelHookValue& result);
+    void Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments,
+        const std::vector<BufferSpec>& bounds, KeelHookValue& result);
+    void CheckBufferEdits(const KeelHookFrame& before, const Frame& after) const;
     void Thread() const;
     void Close(Registration& registration) noexcept;
     static KeelHookAction Dispatch(KeelHookFrame* frame, void* raw) noexcept;
@@ -137,6 +157,12 @@ private:
     KeelHookApi hooks_;
     KeelNativeRuntimeApi runtime_;
     KeelCallApi calls_{};
+    struct BufferScope {
+        KeelHookTargetHandle target;
+        const std::vector<KeelHookValue>* arguments;
+        const std::vector<BufferSpec>* bounds;
+    };
+    std::vector<BufferScope> active_buffers_;
     // Native user_data must survive a resource destructor or facade close until
     // Collect successfully removes every native registration and target lease.
     std::shared_ptr<Service> keepalive_;

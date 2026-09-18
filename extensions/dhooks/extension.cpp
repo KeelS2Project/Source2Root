@@ -69,7 +69,13 @@ private:
             && RegisterNative("SDKCall_SetIntegerText",3,&DHooks::CallSetIntegerText)
             && RegisterNative("SDKCall_SetFloat",3,&DHooks::CallSetNumber)
             && RegisterNative("SDKCall_SetFloatText",3,&DHooks::CallSetNumberText)
-            && RegisterNative("SDKCall_SetNull",2,&DHooks::CallSetNull);
+            && RegisterNative("SDKCall_SetNull",2,&DHooks::CallSetNull)
+            && RegisterNative("SDKCall_SetString",4,&DHooks::CallSetString)
+            && RegisterNative("SDKCall_GetString",4,&DHooks::CallString)
+            && RegisterNative("SDKCall_SetArray",4,&DHooks::CallSetArray)
+            && RegisterNative("SDKCall_GetArray",5,&DHooks::CallArray)
+            && RegisterNative("SDKCall_SetVector",3,&DHooks::CallSetVector)
+            && RegisterNative("SDKCall_GetVector",3,&DHooks::CallVector);
     }
     bool PrepareExtensionUnload() override {
         if (!service_) return true;
@@ -185,6 +191,48 @@ private:
     std::int32_t CallSetNumber(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNumber(call.Int(2),call.Float(3)); return 1; }); }
     std::int32_t CallSetNumberText(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNumberText(call.Int(2),call.String(3)); return 1; }); }
     std::int32_t CallSetNull(NativeCall& call) { return Invoke(call,[&] { Prepared(call).SetNull(call.Int(2)); return 1; }); }
+    std::int32_t CallSetString(NativeCall& call) {
+        return Invoke(call,[&] { Prepared(call).SetString(call.Int(2),call.String(3),call.Int(4)); return 1; });
+    }
+    std::int32_t CallString(NativeCall& call) {
+        call.Output(3,call.Int(4),"");
+        return Invoke(call,[&] {
+            const auto value = Prepared(call).String(call.Int(2));
+            if (value.size() >= static_cast<unsigned>(call.Int(4))) throw dh::Error("String output buffer is too small.");
+            call.Output(3,call.Int(4),value); return 1;
+        });
+    }
+    std::int32_t CallSetArray(NativeCall& call) {
+        return Invoke(call,[&] {
+            const auto count = call.Int(4);
+            if (count < 1 || count > 1024) throw dh::Error("SDKCall array needs 1..1024 elements.");
+            Prepared(call).SetArray(call.Int(2),call.Array(3,count)); return 1;
+        });
+    }
+    std::int32_t CallArray(NativeCall& call) {
+        call.OutputCell(5,0);
+        return Invoke(call,[&] {
+            const auto capacity = call.Int(4);
+            if (capacity < 1 || capacity > 1024) throw dh::Error("SDKCall array output needs 1..1024 elements.");
+            call.OutputArray(3,capacity,std::vector<std::int32_t>(capacity));
+            const auto value = Prepared(call).Array(call.Int(2));
+            if (value.size() > static_cast<unsigned>(capacity)) throw dh::Error("Array output buffer is too small.");
+            call.OutputArray(3,capacity,value); call.OutputCell(5,static_cast<std::int32_t>(value.size())); return 1;
+        });
+    }
+    std::int32_t CallSetVector(NativeCall& call) {
+        return Invoke(call,[&] {
+            const auto value = call.Array(3,3);
+            Prepared(call).SetVector(call.Int(2),{std::bit_cast<float>(value[0]),std::bit_cast<float>(value[1]),std::bit_cast<float>(value[2])}); return 1;
+        });
+    }
+    std::int32_t CallVector(NativeCall& call) {
+        call.OutputArray(3,3,{0,0,0});
+        return Invoke(call,[&] {
+            const auto value = Prepared(call).Vector(call.Int(2));
+            call.OutputArray(3,3,{std::bit_cast<std::int32_t>(value[0]),std::bit_cast<std::int32_t>(value[1]),std::bit_cast<std::int32_t>(value[2])}); return 1;
+        });
+    }
 };
 }
 KEELS2_PLUGIN(DHooks)

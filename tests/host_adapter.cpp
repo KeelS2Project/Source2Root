@@ -669,3 +669,18 @@ std::int32_t SrFixtureHookScalar(std::int32_t value, float real) {
 }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureHookCalls() { return hook_calls; }
 extern "C" KEELS2_GAME_ADAPTER_EXPORT std::int32_t SrFixtureHookOriginal() { return hook_original; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+std::int32_t SrFixtureHookBuffers(char* text, std::uint32_t capacity, std::int32_t* values, std::int32_t count, float* vector) {
+    if (!text || capacity != 8 || std::strcmp(text,"hello") || !values || count != 3 || !vector ||
+        static_cast<void*>(vector) == text || static_cast<void*>(vector) == values) return -1;
+    std::memcpy(text,"changed",8);
+    std::int32_t sum = 0;
+    for (std::int32_t i = 0; i < count; ++i) { values[i] *= 2; sum += values[i]; }
+    for (unsigned i = 0; i < 3; ++i) vector[i] *= 2;
+    return sum;
+}

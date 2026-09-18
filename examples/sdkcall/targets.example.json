@@ -8,6 +8,19 @@
       "symbol": "replace_with_reviewed_profile_target",
       "return": "int32",
       "arguments": ["int32", "float32"]
+    },
+    "example_buffer_call": {
+      "allow_plugins": ["native_call"],
+      "allow_calls": true,
+      "source": "profile",
+      "symbol": "replace_with_reviewed_buffer_profile_target",
+      "return": "int32",
+      "arguments": ["pointer", "uint32", "pointer", "int32", "pointer"],
+      "buffers": [
+        {"argument": 1, "kind": "string", "capacity": 128, "length_argument": 2},
+        {"argument": 3, "kind": "int32", "capacity": 32, "length_argument": 4},
+        {"argument": 5, "kind": "vector3"}
+      ]
     }
   }
 }

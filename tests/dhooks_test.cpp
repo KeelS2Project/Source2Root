@@ -107,6 +107,36 @@ void Definitions(const std::filesystem::path& directory) {
     bad = Example(); bad.source = KH_TARGET_PATTERN; bad.symbol.clear(); bad.pattern = "AA BB";
     Reject([&] { Validate(bad); },"pattern requires profile");
     bad.profile = "exact-profile"; Validate(bad);
+    const std::string buffers = R"({"schema":1,"targets":{"buffers":{"allow_calls":true,"allow_plugins":["first"],"source":"symbol","module":"fixture","symbol":"Buffers","return":"int32","arguments":["pointer","uint32","pointer","int32","pointer"],"buffers":[{"argument":1,"kind":"string","capacity":16,"length_argument":2},{"argument":3,"kind":"int32","capacity":4,"length_argument":4},{"argument":5,"kind":"vector3"}]}}})";
+    save(buffers); auto configured = ReadDefinition(path,"buffers","first");
+    Check(configured.buffers.size()==3 && configured.buffers[0].capacity==16 &&
+        configured.buffers[1].length_argument==4 && configured.buffers[2].kind==BufferKind::vector3 &&
+        configured.buffers[2].capacity==3,"explicit buffer adapters parsed");
+    auto invalid = configured; invalid.buffers.push_back(invalid.buffers[0]);
+    Reject([&] { Validate(invalid); },"duplicate pointer adapter rejected");
+    invalid = configured; invalid.buffers[1].length_argument=2;
+    Reject([&] { Validate(invalid); },"two buffers cannot share one length argument");
+    invalid = configured; invalid.buffers[0].length_argument=3;
+    Reject([&] { Validate(invalid); },"pointer slot cannot hold a length");
+    invalid = configured; invalid.buffers[1].length_argument=0;
+    Reject([&] { Validate(invalid); },"int array requires a checked length");
+    invalid = configured; invalid.buffers[0].capacity=4097;
+    Reject([&] { Validate(invalid); },"string allocation bound enforced");
+    invalid = configured; invalid.buffers[1].capacity=1025;
+    Reject([&] { Validate(invalid); },"array allocation bound enforced");
+    invalid = configured; invalid.buffers[2].length_argument=2;
+    Reject([&] { Validate(invalid); },"vector cannot set a count argument");
+    invalid = configured; invalid.method=true;
+    Reject([&] { Validate(invalid); },"method object cannot be substituted by string memory");
+    invalid = configured; invalid.arguments.assign(5,KH_VALUE_POINTER); invalid.buffers.clear();
+    for (unsigned slot=1;slot<=5;++slot) invalid.buffers.push_back({slot,4096,0,BufferKind::string});
+    Reject([&] { Validate(invalid); },"total buffer storage bound enforced");
+    const std::string buffer_fields = "\"kind\":\"string\",\"capacity\":16";
+    for (const auto& text : {std::string("\"kind\":\"float32\""),std::string("\"kind\":1"),std::string("\"kind\":\"string\",\"capacity\":0")}) {
+        auto malformed = buffers;
+        malformed.replace(malformed.find(buffer_fields),buffer_fields.size(),text);
+        save(malformed); Reject([&] { ReadDefinition(path,"buffers","first"); },"malformed buffer config rejected");
+    }
     save(valid);
 }
 }

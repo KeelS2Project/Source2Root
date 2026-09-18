@@ -120,7 +120,8 @@ int main(int argc, char** argv) {
             std::filesystem::create_directories(directory);
             std::ofstream(directory / "targets.json") << R"({"schema":1,"targets":{"scalar":{"allow_calls":true,"allow_plugins":["hello"],"source":"symbol","module":")"
                 << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]},"observe_only":{"allow_plugins":["hello"],"source":"symbol","module":")"
-                << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]}}})";
+                << adapter_name << R"(","symbol":"SrFixtureHookScalar","return":"int32","arguments":["int32","float32"]},"buffers":{"allow_calls":true,"allow_plugins":["hello"],"source":"symbol","module":")"
+                << adapter_name << R"(","symbol":"SrFixtureHookBuffers","return":"int32","arguments":["pointer","uint32","pointer","int32","pointer"],"buffers":[{"argument":1,"kind":"string","capacity":32,"length_argument":2},{"argument":3,"kind":"int32","capacity":8,"length_argument":4},{"argument":5,"kind":"vector3"}]}}})";
         }
         if (argc == 12 && std::string(argv[10]) == "http") {
             const auto* url = std::getenv("SR_HTTP_URL"), *tls = std::getenv("SR_HTTP_TLS_URL");
@@ -361,6 +362,9 @@ int main(int argc, char** argv) {
             run("sr_sdkcall");
             Check(contains("SDKCALL_CHECK_OK") && calls() == 2 && original() == 24,
                 "direct calls map arguments, bypass or run hooks and reject same-resource recursion");
+            run("sr_sdkcall_buffers");
+            Check(contains("SDKCALL_BUFFERS_OK") && contains("SDKCALL_BUFFER_CLOSE_OK") && contains("SDKCALL_BUFFER_HOOK_BOUNDS_OK"),
+                "owned buffers map across native ABI, copy results and survive callback closure");
             run("keel plugins unload 2"); Check(contains("plugin unload is blocked"),"prepared call retains provider");
             run("sr plugins pause hello"); Check(scalar(3,2) == 8,"paused script hook bypasses callback");
             run("sr plugins resume hello");

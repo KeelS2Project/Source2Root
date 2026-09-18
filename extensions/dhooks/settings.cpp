@@ -44,6 +44,38 @@ void Validate(const Definition& value) {
         std::any_of(value.arguments.begin(),value.arguments.end(),[](unsigned type) { return !type || type > KH_VALUE_FLOAT64; }) ||
         (value.method && (value.arguments.empty() || value.arguments.front() != KH_VALUE_POINTER)))
         throw Error("Unsupported hook prototype; method targets require a leading pointer argument.");
+    std::set<unsigned> buffer_arguments, length_arguments;
+    unsigned buffer_bytes = 0;
+    for (const auto& buffer : value.buffers) {
+        if (!buffer.argument || buffer.argument > value.arguments.size() ||
+            value.arguments[buffer.argument - 1] != KH_VALUE_POINTER ||
+            !buffer_arguments.insert(buffer.argument).second || (value.method && buffer.argument == 1))
+            throw Error("Buffer adapter requires one distinct pointer argument, excluding the method object.");
+        if (buffer.length_argument) {
+            if (buffer.length_argument > value.arguments.size() ||
+                (value.arguments[buffer.length_argument - 1] != KH_VALUE_INT32 &&
+                 value.arguments[buffer.length_argument - 1] != KH_VALUE_UINT32) ||
+                !length_arguments.insert(buffer.length_argument).second)
+                throw Error("Buffer length requires one distinct int32 or uint32 argument.");
+        }
+        switch (buffer.kind) {
+            case BufferKind::string:
+                if (!buffer.capacity || buffer.capacity > 4096) throw Error("String buffer capacity must be 1..4096 bytes.");
+                buffer_bytes += buffer.capacity;
+                break;
+            case BufferKind::int32:
+                if (!buffer.capacity || buffer.capacity > 1024 || !buffer.length_argument)
+                    throw Error("Integer array needs a 1..1024 element limit and a length argument.");
+                buffer_bytes += buffer.capacity * sizeof(std::int32_t);
+                break;
+            case BufferKind::vector3:
+                if (buffer.capacity != 3 || buffer.length_argument) throw Error("Vector adapter requires exactly three floats and no length argument.");
+                buffer_bytes += 3 * sizeof(float);
+                break;
+            default: throw Error("Unsupported SDKCall buffer adapter.");
+        }
+        if (buffer_bytes > 16384) throw Error("Configured SDKCall buffers exceed 16 KiB per call.");
+    }
     if (!TextValid(value.module,4095) || !TextValid(value.symbol,512) || !TextValid(value.pattern,16384) || !TextValid(value.profile,512))
         throw Error("Invalid hook resolver text.");
     if (value.source == KH_TARGET_PROFILE) {
@@ -78,7 +110,7 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
             throw Error("Unsupported hook configuration schema.");
         if (!json.at("targets").contains(name)) throw Error("Hook target was not found.");
         const auto& target = json.at("targets").at(name);
-        Keys(target,{"allow_plugins","allow_calls","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments"});
+        Keys(target,{"allow_plugins","allow_calls","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments","buffers"});
         const auto& allowed = target.at("allow_plugins");
         if (!allowed.is_array() || allowed.empty() || allowed.size() > 128) throw Error("Hook target requires a plugin allow list.");
         bool permitted = false;
@@ -107,6 +139,29 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
         const auto& arguments = target.at("arguments");
         if (!arguments.is_array() || arguments.size() > KEELHOOK_MAX_ARGUMENTS) throw Error("Hook arguments require at most32 scalar types.");
         for (const auto& type : arguments) result.arguments.push_back(Type(type));
+        if (target.contains("buffers")) {
+            const auto& buffers = target.at("buffers");
+            if (!buffers.is_array() || buffers.size() > KEELHOOK_MAX_ARGUMENTS) throw Error("SDKCall buffers require an array of at most32 adapters.");
+            for (const auto& entry : buffers) {
+                Keys(entry,{"argument","kind","capacity","length_argument"});
+                BufferSpec buffer;
+                const auto kind = Text(entry,"kind");
+                if (kind == "string") buffer.kind = BufferKind::string;
+                else if (kind == "int32") buffer.kind = BufferKind::int32;
+                else if (kind == "vector3") {
+                    Keys(entry,{"argument","kind"}); buffer.kind = BufferKind::vector3;
+                } else throw Error("Unknown SDKCall buffer kind.");
+                const auto argument = Number(entry,"argument"), length_argument = Number(entry,"length_argument");
+                const auto capacity = buffer.kind == BufferKind::vector3 ? 3 : Number(entry,"capacity");
+                if (argument < 1 || argument > KEELHOOK_MAX_ARGUMENTS || length_argument < 0 ||
+                    length_argument > KEELHOOK_MAX_ARGUMENTS || capacity < 1 || capacity > 4096)
+                    throw Error("SDKCall buffer configuration is out of range.");
+                buffer.argument = static_cast<unsigned>(argument);
+                buffer.capacity = static_cast<unsigned>(capacity);
+                buffer.length_argument = static_cast<unsigned>(length_argument);
+                result.buffers.push_back(buffer);
+            }
+        }
         Validate(result); return result;
     } catch (const Error&) { throw; }
     catch (const std::exception&) { throw Error("Invalid hook configuration."); }
