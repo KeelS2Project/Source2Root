@@ -76,8 +76,8 @@ void Copy(const std::filesystem::path& from, const std::filesystem::path& to) {
 
 int main(int argc, char** argv) {
     try {
-        Check(argc == 10 || argc == 11 || argc == 12 || argc == 15,
-            "module_integration host adapter tier0 module extension pawn sample manifest fixture [mode descriptors [random roll roll-manifest]]");
+        Check(argc == 10 || argc == 11 || argc == 12 || argc == 15 || argc == 16,
+            "module_integration host adapter tier0 module extension pawn sample manifest fixture [mode descriptors [random roll roll-manifest [extensions-directory]]]");
         const auto fixture = std::filesystem::absolute(argv[9]);
 #if defined(_WIN32)
         const std::string platform = "win64", host_name = "keels2_host.dll", adapter_name = "keels2_game_cs2.dll";
@@ -90,8 +90,9 @@ int main(int argc, char** argv) {
         const auto script = fixture / "addons/source2root";
         const auto bin = native / "bin" / platform;
         const auto plugins = native / "plugins" / platform;
+        if (argc == 16) std::filesystem::remove_all(plugins);
         std::filesystem::remove_all(plugins / ".runtime");
-        if (argc == 15) {
+        if (argc >= 15) {
             std::filesystem::remove(plugins / ("source2root_random" + extension));
             std::filesystem::remove(script / "plugins/roll/plugin.json");
             std::filesystem::remove(script / "plugins/roll/roll.smx");
@@ -1213,7 +1214,7 @@ int main(int argc, char** argv) {
         Check(say("+hello", 3) && answers() == reloaded_answers + 1 && !say("##unknown", 3),
               "reloaded core uses new public and silent triggers");
         run("sr plugins load greeting");
-        if (argc == 15) {
+        if (argc >= 15) {
             Copy(argv[13], script / "plugins/roll/roll.smx");
             Copy(argv[14], script / "plugins/roll/plugin.json");
             run("sr plugins load roll");
@@ -1254,6 +1255,25 @@ int main(int argc, char** argv) {
             run("keel plugins load source2root_random" + extension);
             run("sr plugins retry roll");
             run("sr_roll 1");
+        }
+        if (argc == 16) {
+            const auto packaged_extensions = std::filesystem::absolute(argv[15]);
+            const auto libraries = packaged_extensions / "lib";
+            if (std::filesystem::exists(libraries)) {
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(libraries)) {
+                    if (entry.is_regular_file())
+                        Copy(entry.path(), plugins / "lib" / std::filesystem::relative(entry.path(), libraries));
+                }
+            }
+            for (const auto& entry : std::filesystem::directory_iterator(packaged_extensions)) {
+                if (!entry.is_regular_file() || entry.path().extension() != extension ||
+                    entry.path().filename() == "source2root_random" + extension) continue;
+                Copy(entry.path(), plugins / entry.path().filename());
+                const auto before_load = std::string(messages()).size();
+                run("keel plugins load " + entry.path().filename().string());
+                Check(std::string(messages()).substr(before_load).find("plugin loaded:") != std::string::npos,
+                    "packaged optional extension loads through host shadow staging");
+            }
         }
         Check(!stop(), "first global stop retains modules while platform releases script provider leases");
         Check(stop(), "second global stop completes after every plugin can prepare");

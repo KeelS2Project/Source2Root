@@ -19,16 +19,16 @@ def run(*args, cwd=None, env=None):
     subprocess.run(list(map(str, args)), cwd=cwd, env=env, check=True)
 
 
-def checkout(path, repository, revision, recursive=False):
+def checkout(path, repository, revision, recursive=False, local_source=None):
     if not path.exists():
-        run("git", "clone", repository, path)
+        run("git", "clone", local_source or repository, path)
     dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=path, text=True)
     if dirty:
         raise RuntimeError(f"Refusing to change dirty dependency: {path}")
     try:
         run("git", "cat-file", "-e", revision + "^{commit}", cwd=path)
     except subprocess.CalledProcessError:
-        run("git", "fetch", "origin", revision, cwd=path)
+        run("git", "fetch", local_source or "origin", revision, cwd=path)
     run("git", "checkout", "--detach", revision, cwd=path)
     if recursive:
         run("git", "submodule", "update", "--init", "--recursive", cwd=path)
@@ -39,13 +39,18 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "out")
     parser.add_argument("--configuration", default="RelWithDebInfo")
     parser.add_argument("--sanitizers", action="store_true")
+    parser.add_argument("--keels2-source", type=Path,
+        help="Local repository containing the locked KeelS2 commit; copied into the build dependencies")
     args = parser.parse_args()
     output = args.output.resolve()
     deps = output / "deps"
     deps.mkdir(parents=True, exist_ok=True)
     for name in ("keels2", "sourcepawn", "ambuild"):
         dependency = LOCK[name]
-        checkout(deps / name, dependency["repository"], dependency["revision"], name == "sourcepawn")
+        local_source = args.keels2_source.resolve(strict=True) if name == "keels2" and args.keels2_source else None
+        if local_source:
+            run("git", "cat-file", "-e", dependency["revision"] + "^{commit}", cwd=local_source)
+        checkout(deps / name, dependency["repository"], dependency["revision"], name == "sourcepawn", local_source)
     for path, key in (("third_party/amtl", "amtl_revision"),
                       ("third_party/amtl/third_party/googletest", "googletest_revision")):
         actual = subprocess.check_output(["git", "rev-parse", "HEAD"],

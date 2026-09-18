@@ -24,3 +24,17 @@ acquired at revisions in `dependencies.lock.json` and retain their own notices.
   for its bundled components. It is built as a separate shared library. Preserve
   COPYING.LIB, source notices and corresponding buildable source when distributing
   it. TLS uses the platform TLS library (OpenSSL on Linux, Schannel on Windows).
+* libmaxminddb: Apache-2.0. Only the reader library is included; production
+  GeoIP databases are separate inputs with their own terms.
+* PCRE2 retains its BSD license and the notices for bundled components,
+  including SLJIT. Preserve its complete LICENCE.md and source notices.
+* curl retains its upstream copyright and permission notice in COPYING.
+* PostgreSQL's libpq retains the PostgreSQL license in COPYRIGHT and its
+  per-file notices. The pinned Meson build tool retains its Apache-2.0 license.
+  Our private libpq copy adds the marked Apache-2.0 TLS BIO-method cleanup in
+  `cmake/libpq_tls_cleanup.c` for extension unload after all connections close.
+
+Optional extension distributions include the actual dependency source inputs,
+their per-file hashes, a CMake source-selection file and copied upstream license
+material. Platform libraries such as OpenSSL and zlib remain system dependencies
+unless a platform package explicitly includes them and their notices.

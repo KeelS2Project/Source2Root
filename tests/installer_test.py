@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("live", Path(__file__).resolve().parents[1] / "tools/live.py")
 live = importlib.util.module_from_spec(spec)
@@ -12,7 +13,8 @@ spec.loader.exec_module(live)
 
 
 class InstallerTest(unittest.TestCase):
-    def test_restore_preserves_private_data_and_refuses_concurrent_change(self):
+    @patch.object(live, "stopped")
+    def test_restore_preserves_private_data_and_refuses_concurrent_change(self, stopped):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             server = root / "server"
@@ -62,6 +64,7 @@ class InstallerTest(unittest.TestCase):
             self.assertEqual(installed.read_bytes(), b"someone else's edit")
             installed.write_bytes(b"candidate")
             live.restore(args)
+            stopped.assert_called()
             self.assertFalse(installed.exists())
             for relative, content in originals.items():
                 self.assertEqual((server / relative).read_bytes(), content)

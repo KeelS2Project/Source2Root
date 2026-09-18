@@ -13,6 +13,7 @@ import sys
 import tarfile
 import urllib.request
 import zipfile
+import package_extensions
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = json.loads((ROOT / "dependencies.lock.json").read_text())
@@ -100,10 +101,18 @@ def main():
         if (ROOT / name).is_file():
             copy(ROOT / name, own / name)
     for name in ("sourcepawn", "ambuild", "keels2"):
+        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=deps / name, text=True).strip()
+        if actual != LOCK[name]["revision"] or subprocess.check_output(
+                ["git", "diff", "HEAD", "--name-only"], cwd=deps / name, text=True).strip():
+            raise RuntimeError(f"Dependency sources differ from the lock: {name}")
         snapshot(deps / name, source / "dependencies" / name)
     for path in ("third_party/amtl", "third_party/amtl/third_party/googletest"):
         snapshot(deps / "sourcepawn" / path, source / "dependencies/sourcepawn" / path)
     cache = (build / "CMakeCache.txt").read_text()
+    extensions = package_extensions.inventory(build, args.configuration)
+    if extensions["platform"] != PLATFORM:
+        raise RuntimeError("Extension inventory platform does not match the packager")
+    extension_sources = package_extensions.source_inputs(extensions, source, LOCK)
     sdk_root = Path(re.search(r"^KEELS2_SOURCE_SDK_RESOLVED_ROOT:INTERNAL=(.+)$", cache, re.M)[1])
     tree(sdk_root, source / "dependencies/hl2sdk")
     json_archive = deps / "json-source.tar.gz"
@@ -121,6 +130,7 @@ def main():
         "schema": 1, "version": "1.0.0", "channel": "foundation development candidate",
         "source2root_revision": revision, "dirty": dirty, "os": OS, "architecture": "x64",
         "configuration": args.configuration, "keels2_runtime": LOCK["keels2"]["revision"],
+        "extension_sources": extension_sources,
         "dependencies": LOCK, "python": platform.python_version(),
         "cmake": subprocess.check_output(["cmake", "--version"], text=True).splitlines()[0],
         "ci_run": os.environ.get("GITHUB_RUN_ID"), "compiler_cache": [line for line in cache.splitlines()
@@ -140,6 +150,7 @@ def main():
     archive(source, source_archive)
     runtime = stage / "runtime"
     developer = stage / "developer"
+    optional = stage / "extensions"
     tree(keel / "package", runtime)
     native_root = runtime / "addons/keels2/plugins"
     if native_root.exists():
@@ -157,21 +168,25 @@ def main():
     for name in ("admins.cfg", "admin_groups.cfg", "allowed_maps.txt", "map_menu.txt"):
         copy(ROOT / "configs" / name, runtime / "addons/source2root/configs" / name)
     tree(output / "sdk", developer / "sdk")
-    for header in ("extension.h", "extension.hpp", "native.h", "native.hpp", "callbacks.h", "work_queue.hpp"):
+    for header in ("extension.h", "extension.hpp", "native.h", "native.hpp", "callbacks.h", "http.h", "work_queue.hpp"):
         copy(ROOT / "include/source2root" / header, developer / "sdk/include/source2root" / header)
-    copy(binaries / (module_prefix + "source2root_random" + SUFFIX),
-         developer / "extensions" / PLATFORM / ("source2root_random" + SUFFIX))
+    extension_catalog = package_extensions.assemble(extensions, build, args.configuration, optional, developer)
     copy(ROOT / "cmake/Source2RootConfig.cmake", developer / "sdk/lib/cmake/Source2Root/Source2RootConfig.cmake")
     tree(ROOT / "examples", developer / "examples")
     tree(ROOT / "plugins", developer / "plugins")
     tree(ROOT / "scripting", developer / "scripting")
+    tree(ROOT / "configs/extensions", developer / "configs/extensions")
     copy(pawn / "spcomp" / pawn_arch / compiler, developer / "compiler/bin" / PLATFORM / compiler)
-    for package in (runtime, developer):
+    packages = (("runtime", runtime), ("developer", developer), ("extensions", optional))
+    for _, package in packages:
         for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "dependencies.lock.json"):
             copy(ROOT / name, package / name)
         tree(ROOT / "licenses", package / "licenses")
-        copy(ROOT / "tools/live.py", package / "tools/live.py")
-        copy(ROOT / "tools/migrate_admins.py", package / "tools/migrate_admins.py")
+        if (source / "extension-licenses").exists():
+            tree(source / "extension-licenses", package / "licenses/extensions")
+        if package != optional:
+            copy(ROOT / "tools/live.py", package / "tools/live.py")
+            copy(ROOT / "tools/migrate_admins.py", package / "tools/migrate_admins.py")
         copy(source_archive, package / "sources" / source_archive.name)
         copy(source / "provenance.json", package / "provenance.json")
         for path in package.rglob("*.cmake"):
@@ -179,9 +194,10 @@ def main():
             if str(output) in text or str(ROOT) in text:
                 raise RuntimeError(f"Absolute build path in installed SDK: {path}")
     dependency_report = []
-    for package in (runtime, developer):
+    for _, package in packages:
         for path in sorted(package.rglob("*")):
-            if not path.is_file() or (path.suffix not in (".so", ".dll", ".exe") and path.name != "spcomp"):
+            if not path.is_file() or (path.suffix not in (".dll", ".exe")
+                    and not re.search(r"\.so(?:\.\d+)*$", path.name) and path.name != "spcomp"):
                 continue
             if WINDOWS:
                 dumpbin = shutil.which("dumpbin")
@@ -193,8 +209,10 @@ def main():
             else:
                 run("strip", "--strip-unneeded", path)
                 report = subprocess.check_output(["readelf", "-d", str(path)], text=True)
-                if re.search(r"\((?:RPATH|RUNPATH)\).*\[(?!\$ORIGIN)[^]]+\]", report):
-                    raise RuntimeError(f"Non-relative dynamic search path: {path}")
+                for paths in re.findall(r"\((?:RPATH|RUNPATH)\).*\[([^]]*)\]", report):
+                    if any(not entry.startswith(("$ORIGIN/", "${ORIGIN}/"))
+                           and entry not in ("$ORIGIN", "${ORIGIN}") for entry in paths.split(":")):
+                        raise RuntimeError(f"Non-relative dynamic search path: {path}")
                 if re.search(r"Shared library: \[[^]]*/", report):
                     raise RuntimeError(f"Absolute dynamic dependency: {path}")
             data = path.read_bytes()
@@ -208,7 +226,7 @@ def main():
             dependency_report.append(str(path.relative_to(stage)) + "\n" + report)
     (dist / (prefix + "-dependencies.txt")).write_text("\n".join(dependency_report))
     archives = {}
-    for name, package in (("runtime", runtime), ("developer", developer)):
+    for name, package in packages:
         files = {p.relative_to(package).as_posix(): sha(p) for p in sorted(package.rglob("*")) if p.is_file()}
         (package / "files.sha256.json").write_text(json.dumps(files, indent=2) + "\n")
         archives[name] = dist / (prefix + f"-{name}.zip")
@@ -257,7 +275,8 @@ def main():
     for variant, module in (("shipped", dev / "extensions" / PLATFORM / ("source2root_random" + SUFFIX)),
                             ("rebuilt", ext_bin / ("source2root_random" + SUFFIX))):
         run(*base, *tail, verify / ("host-" + variant), "package", build / "test-fixtures/gameevents.pb",
-            module, scripts / "roll.smx", dev / "examples/roll/plugin.json")
+            module, scripts / "roll.smx", dev / "examples/roll/plugin.json",
+            verify / "extensions/addons/keels2/plugins" / PLATFORM)
     expected_scripts = {p.parent.name for p in (ROOT / "plugins").glob("*/plugin.json")}
     actual_scripts = {p.parent.name for p in (rt / "addons/source2root/plugins").glob("*/*.smx")}
     actual_native = {p.relative_to(rt / "addons/keels2/plugins").as_posix()
@@ -270,6 +289,7 @@ def main():
         "revision": revision, "dirty": dirty, "extracted_checksums": "pass", "compiler": "pass",
         "installed_sdk_extension": "pass", "shipped_and_rebuilt_actual_module_execution": "pass",
         "runtime_script_plugins": sorted(actual_scripts), "test_fixtures_installed": False,
+        "optional_extensions": extension_catalog["modules"], "optional_extension_load_and_shutdown": "pass",
         "dynamic_dependency_inventory": "pass", "real_cs2_client": "external gate, not tested"}, indent=2) + "\n")
     print(f"Candidate packages verified: {dist}", flush=True)
 
