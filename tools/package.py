@@ -269,7 +269,7 @@ def main():
     host_name = "keels2_host.dll" if WINDOWS else "libkeels2_host.so"
     tier_dir = keel / args.configuration if WINDOWS else keel
     tier_name = "tier0.dll" if WINDOWS else "libtier0.so"
-    harness = binaries / ("sr_module_integration.exe" if WINDOWS else "sr_module_integration")
+    harness = binaries / ("sr_package_integration.exe" if WINDOWS else "sr_package_integration")
     adapter = binaries / (module_prefix + "sr_host_adapter" + SUFFIX)
     base = [harness, rt / "addons/keels2/bin" / PLATFORM / host_name, adapter, tier_dir / tier_name,
             rt / "addons/keels2/plugins" / PLATFORM / ("source2root" + SUFFIX)]

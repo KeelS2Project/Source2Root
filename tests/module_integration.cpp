@@ -75,6 +75,9 @@ void Copy(const std::filesystem::path& from, const std::filesystem::path& to) {
 }
 
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#endif
     try {
         Check(argc == 10 || argc == 11 || argc == 12 || argc == 15 || argc == 16,
             "module_integration host adapter tier0 module extension pawn sample manifest fixture [mode descriptors [random roll roll-manifest [extensions-directory]]]");
