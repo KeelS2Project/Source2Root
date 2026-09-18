@@ -140,6 +140,9 @@ def main():
                                       for line in provenance["compiler_cache"]]
     provenance["compiler_cache"] = [line.replace(str(output), "<OUTPUT>").replace(output.as_posix(), "<OUTPUT>")
         .replace(str(ROOT), "<SOURCE>").replace(ROOT.as_posix(), "<SOURCE>") for line in provenance["compiler_cache"]]
+    provenance["compiler_cache"] = [re.sub(
+        r"(-f(?:file|debug|macro)-prefix-map=|/pathmap:)[^=]+=", r"\1<BUILD_ROOT>=", line)
+        for line in provenance["compiler_cache"]]
     compiler_info = next((build / "CMakeFiles").glob("*/CMakeCXXCompiler.cmake")).read_text()
     provenance["compiler"] = dict(re.findall(r'set\(CMAKE_CXX_(COMPILER_ID|COMPILER_VERSION|PLATFORM_ID|SIMULATE_VERSION) "([^"\n]*)"\)', compiler_info))
     provenance["runner_image"] = os.environ.get("ImageVersion", platform.platform())
