@@ -653,6 +653,10 @@ if(BUILD_TESTING)
     add_test(NAME core_configuration COMMAND sr_config_test "${CMAKE_BINARY_DIR}/test-fixtures/config/source2root.cfg"
         "${CMAKE_SOURCE_DIR}/configs/source2root.cfg")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    find_program(SR_TEST_OPENSSL NAMES openssl REQUIRED)
+    add_test(NAME compatibility_updater COMMAND "${Python3_EXECUTABLE}" -B
+        "${CMAKE_SOURCE_DIR}/tests/compatibility_update_test.py" --openssl "${SR_TEST_OPENSSL}")
+    set_tests_properties(compatibility_updater PROPERTIES TIMEOUT 60)
     add_test(NAME live_launch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/live_launch_test.py")
     add_test(NAME installer_restore COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/installer_test.py")
     add_test(NAME administrator_migration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/migration_test.py"

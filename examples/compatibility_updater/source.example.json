@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "url": "https://updates.example.invalid/cs2/linux/manifest.json",
+  "product": "Source2Root",
+  "game": "cs2",
+  "platform": "linuxsteamrt64",
+  "files": ["targets.json", "profile.tsv"],
+  "minimum_sequence": 1,
+  "timeout": 15
+}

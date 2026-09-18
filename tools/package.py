@@ -190,6 +190,7 @@ def main():
         if package != optional:
             copy(ROOT / "tools/live.py", package / "tools/live.py")
             copy(ROOT / "tools/migrate_admins.py", package / "tools/migrate_admins.py")
+            copy(ROOT / "tools/compatibility_update.py", package / "tools/compatibility_update.py")
         copy(source_archive, package / "sources" / source_archive.name)
         copy(source / "provenance.json", package / "provenance.json")
         for path in package.rglob("*.cmake"):
