@@ -27,7 +27,11 @@ struct Fixture {
     unsigned mutation = 0, metadata_fault = 0, reads = 0, writes = 0, write_caps = 1;
     KeelResult write_status = KEEL_RESULT_OK, caps_status = KEEL_RESULT_OK;
     std::vector<std::byte> last_write;
-    std::function<void()> on_write, on_tool, on_tool_caps;
+    std::function<void()> on_write, on_tool, on_tool_caps, on_describe, on_input, on_input_caps;
+    unsigned input_calls{}, input_direct{511}, input_queued{383};
+    KeelBool input_invoked{KEEL_TRUE};
+    KeelResult input_result{KEEL_RESULT_OK};
+    KeelEntityInputRequest last_input{}; std::string input_name, input_text;
     unsigned tool_calls = 0, tool_kind = 0, tool_caps = 7;
     std::set<KeelEntityHandle> pending;
     unsigned creates = 0, cancels = 0, keys = 0, spawns = 0, pending_teleports = 0;
@@ -79,6 +83,7 @@ struct Fixture {
     }
     static KeelResult Describe(KeelPluginHandle, KeelEntityHandle handle, KeelEntityInfo* info) {
         auto& s = *active;
+        const auto callback = s.on_describe; if (callback) callback();
         if (s.available != KEEL_RESULT_OK) return s.available;
         const auto found = s.entities.find(handle);
         if (found == s.entities.end() || found->second.epoch != s.epoch || s.pending.contains(handle)) return KEEL_RESULT_NOT_FOUND;
@@ -221,6 +226,23 @@ struct Fixture {
         DescribePending,SetKey,TeleportPending,Spawn,
         [](KeelPluginHandle,std::uint32_t,KeelEntityHandle*) { return KEEL_RESULT_UNSUPPORTED; },
         [](KeelPluginHandle,KeelEntityHandle,const char*,KeelEntityAccessCallback,void*) { return KEEL_RESULT_UNSUPPORTED; }};
+    static KeelResult InputCapabilities(KeelPluginHandle, unsigned* direct, unsigned* queued) {
+        const auto callback = active->on_input_caps; if (callback) callback();
+        *direct = active->input_direct; *queued = active->input_queued; return active->input_result;
+    }
+    static KeelResult Input(KeelPluginHandle owner, KeelEntityHandle target, const KeelEntityInputRequest* request, KeelBool* invoked) {
+        auto& s = *active; *invoked = KEEL_FALSE;
+        for (const auto entity : {target,request->activator,request->caller,request->value_entity}) if (entity) {
+            KeelEntityInfo info{}; if (Describe(owner,entity,&info) != KEEL_RESULT_OK) return KEEL_RESULT_NOT_FOUND;
+        }
+        if (request->queued && request->value.type == KEELS2_INPUT_COLOR) return KEEL_RESULT_UNSUPPORTED;
+        ++s.input_calls; *invoked = s.input_invoked;
+        const auto callback = s.on_input; if (callback) callback();
+        s.last_input = *request; s.input_name = request->input;
+        s.input_text = request->value.type == KEELS2_INPUT_STRING ? request->value.string_value : "";
+        return s.input_result;
+    }
+    static inline const KeelEntityInputApi input_api{sizeof(KeelEntityInputApi),1,InputCapabilities,Input};
     static inline const KeelEntityToolsApi tools_api{sizeof(KeelEntityToolsApi),1,ToolCapabilities,
         [](KeelPluginHandle p,KeelEntityHandle e,const KeelEntityTeleport* t) { return Tool(p,e,1,t,nullptr); },
         [](KeelPluginHandle p,KeelEntityHandle e,const char* model) { return Tool(p,e,2,nullptr,model); },
@@ -230,9 +252,10 @@ struct Fixture {
     static inline const KeelSchemaApi schema_api{sizeof(KeelSchemaApi), 1, Resolve, ReleaseField, DescribeField};
     static inline const KeelPlayersApi player_api{sizeof(KeelPlayersApi), 1, nullptr, nullptr, Player};
     static inline const KeelNativeRuntimeApi runtime_api{sizeof(KeelNativeRuntimeApi), 1, Thread, nullptr, nullptr, nullptr};
-    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1, bool construction = false) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api, &writes_api, &tools_api, construction ? &construction_api : nullptr); }
+    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1, bool construction = false) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api, &writes_api, &tools_api, construction ? &construction_api : nullptr, &input_api); }
 };
 Fixture* Fixture::active = nullptr;
+#include "sdktools_input_fixture.h"
 void Construction() {
     Fixture f; auto service = f.ServiceFor(1,true); service->ConstructionReady();
     auto legacy = f.ServiceFor(); Reject([&] { legacy->ConstructionReady(); },"legacy readiness");
@@ -322,6 +345,7 @@ void Construction() {
 }
 int main() {
     try {
+        Inputs();
         Construction();
         Fixture fixture;
         auto service = fixture.ServiceFor();

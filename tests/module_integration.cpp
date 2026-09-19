@@ -654,6 +654,45 @@ int main(int argc, char** argv) {
             Check(!contains("CONSTRUCTION_FAILED"),"all construction script assertions passed");
             std::cout << messages() << "Entity construction actual-host lifecycle passed\n"; return 0;
         }
+        if (argc == 12 && std::string(argv[10]) == "entity_input") {
+            auto mode = adapter.Get<void (*)(unsigned)>("SrFixtureEntityInputMode");
+            auto tally = adapter.Get<unsigned (*)(unsigned)>("SrFixtureEntityInputCount");
+            auto epoch = adapter.Get<void (*)()>("SrFixtureEntityEpoch");
+            const auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned total{}; std::size_t at{};
+                while ((at = log.find(value,at)) != std::string::npos) { ++total; at += std::strlen(value); }
+                return total;
+            };
+            Check(occurrences("INPUT_SCRIPT_READY") == 1,"input script registers typed natives");
+            run("sr_input_all");
+            Check(contains("INPUT_ALL_OK") && tally(0) == 17 && tally(1) == 511 && tally(2) == 383 && tally(3) && tally(4) == 8,
+                "all direct/queued types and independent queue storage survive closing handles");
+            run("sr_input_invalid"); Check(contains("INPUT_INVALID_OK") && tally(0) == 17,"invalid payloads/participants never dispatch");
+            run("sr_input_bad_payload"); run("sr_input_refusal");
+            run("sr_input_bad_participant"); run("sr_input_refusal");
+            Check(occurrences("INPUT_REFUSAL_OK") == 2 && tally(0) == 17 && contains("invalid handle"),"invalid script handles raise native errors after clearing invocation output");
+            mode(1); run("sr_input_retry"); mode(2); run("sr_input_error");
+            Check(contains("INPUT_RETRY_OK") && contains("INPUT_ERROR_OK") && tally(0) == 18,"invocation output distinguishes failure before/after engine entry");
+            mode(3); run("sr_input_close");
+            Check(contains("INPUT_CLOSE_OK") && tally(0) == 19 && tally(3),"callback closes participants and mutates script payload safely");
+            mode(4); run("sr_input_all");
+            Check(occurrences("INPUT_ALL_OK") == 2 && contains("active native operation") && tally(0) == 36,"input callback cannot unload provider");
+            mode(5); run("sr_input_recursion");
+            Check(contains("INPUT_RECURSION_OK") && tally(0) == 44,"compiled script input recursion bounded to eight"); mode(0);
+            run("sr_input_leave"); epoch(); run("sr_input_stale");
+            Check(contains("INPUT_STALE_OK") && tally(0) == 44,"map change invalidates all saved participant identities");
+            run("sr_input_leave"); run("sr plugins reload hello"); frame(); run("sr_input_all");
+            Check(occurrences("INPUT_SCRIPT_READY") == 2 && occurrences("INPUT_ALL_OK") == 3,"script reload rebinds typed input natives");
+            const auto queued_before_unload = tally(4);
+            run("sr plugins unload hello"); frame(); run("keel plugins unload 2");
+            Check(tally(4) == queued_before_unload,"engine queue copies survive script/provider unload");
+            run("keel plugins load sr_example" + extension); run("sr plugins load hello"); run("sr_input_all");
+            Check(occurrences("INPUT_SCRIPT_READY") == 3 && occurrences("INPUT_ALL_OK") == 4 && tally(3),"provider reload reacquires input service");
+            run("sr_input_leave"); run("sr plugins unload hello"); frame();
+            Check(stop(),"input host shutdown"); Check(network_stop(),"input fixture teardown");
+            Check(!contains("INPUT_FAILED"),"all input script assertions passed");
+            std::cout << messages() << "Entity input actual-host lifecycle passed\n"; return 0;
+        }
         if (argc == 12 && std::string(argv[10]) == "sdktools") {
             auto occurrences = [&](const char* value) {
                 const std::string log = messages(); unsigned count = 0; std::size_t at = 0;

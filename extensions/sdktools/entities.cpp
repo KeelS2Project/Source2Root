@@ -1,5 +1,6 @@
 #include "entities.h"
 #include <keels2/detail/authoring_status.hpp>
+#include <keels2/detail/entity_input_copy.hpp>
 #include <algorithm>
 #include <charconv>
 #include <utility>
@@ -103,8 +104,8 @@ IntegerValue ParseInteger(const std::string& text) {
 
 }
 Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes, const KeelEntityToolsApi* tools, const KeelEntityConstructionApi* construction)
-    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime), writes_(writes ? *writes : KeelEntityWritesApi{}), tools_(tools ? *tools : KeelEntityToolsApi{}), construction_(construction ? *construction : KeelEntityConstructionApi{}) {
+        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes, const KeelEntityToolsApi* tools, const KeelEntityConstructionApi* construction, const KeelEntityInputApi* input)
+    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime), writes_(writes ? *writes : KeelEntityWritesApi{}), tools_(tools ? *tools : KeelEntityToolsApi{}), construction_(construction ? *construction : KeelEntityConstructionApi{}), input_(input ? *input : KeelEntityInputApi{}) {
     if (!plugin || entities.size != sizeof(entities) || entities.api_version != KEELS2_ENTITIES_API_VERSION ||
         !entities.find_by_index || !entities.find_by_source2_handle || !entities.release || !entities.describe || !entities.equal || !entities.read_field ||
         schema.size != sizeof(schema) || schema.api_version != KEELS2_SCHEMA_API_VERSION ||
@@ -120,6 +121,8 @@ Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const
         !construction->ready || !construction->create || !construction->describe || !construction->set ||
         !construction->teleport || !construction->spawn || !construction->observe || !construction->visit))
         throw Error("Incompatible entity construction service.");
+    if (input && (input->size != sizeof(*input) || input->api_version != KEELS2_ENTITY_INPUT_API_VERSION ||
+        !input->capabilities || !input->dispatch)) throw Error("Incompatible entity input service.");
 }
 void Service::Thread() const { Check(runtime_.check_game_thread(plugin_), "Entity operation"); }
 void Service::ConstructionReady() const {
@@ -336,6 +339,49 @@ void Entity::Spawn(bool& invoked) const {
     invoked = called != KEEL_FALSE;
     if (called > KEEL_TRUE) throw Error("Host returned an invalid spawn invocation marker.");
     Check(result,"Dispatch entity spawn");
+}
+std::array<unsigned,2> Service::InputCapabilities() {
+    const auto keep = shared_from_this(); keep->Thread();
+    if (!keep->input_.capabilities) throw Error("Entity input service is unavailable.");
+    if (keep->active_tools_ >= 8) throw Error("Entity operation recursion limit (8) reached.");
+    struct Hold { unsigned& count; ~Hold() { --count; } } hold{keep->active_tools_}; ++hold.count;
+    std::array<unsigned,2> types{};
+    Check(keep->input_.capabilities(keep->plugin_,&types[0],&types[1]),"Entity input capabilities");
+    if ((types[0] | types[1]) & ~511u) throw Error("Host returned unknown entity input types.");
+    return types;
+}
+void Entity::Input(const char* name, const KeelEntityInputValue& value, bool& invoked,
+    const Entity* activator, const Entity* caller, const Entity* value_entity, bool queued, float delay) const {
+    invoked = false;
+    const auto keep = service_;
+    // Capture every participant before any host call: callbacks may destroy
+    // this Entity, any participant, and the provider's service_ member.
+    const Entity* participants[]{this,activator,caller,value_entity};
+    std::array<KeelEntityHandle,4> handles{};
+    std::array<KeelEntityInfo,4> expected{};
+    for (std::size_t i = 0; i < handles.size(); ++i) if (participants[i]) {
+        if (participants[i]->service_ != keep) throw Error("Input entities belong to different service owners.");
+        handles[i] = participants[i]->handle_; expected[i] = participants[i]->identity_;
+        if (!handles[i]) throw Error("Input entity handle is closed.");
+    }
+    if ((value.type == KEELS2_INPUT_ENTITY) != (value_entity != nullptr)) throw Error("Input entity payload does not match its type.");
+    keels2::detail::EntityInputCopy copy;
+    Check(copy.Assign(name,value,queued ? KEEL_TRUE : KEEL_FALSE,delay),"Entity input value");
+    keep->Thread();
+    if (!keep->input_.dispatch) throw Error("Entity input service is unavailable.");
+    if (keep->active_tools_ >= 8) throw Error("Entity operation recursion limit (8) reached.");
+    struct Hold { unsigned& count; ~Hold() { --count; } } hold{keep->active_tools_}; ++hold.count;
+    for (std::size_t i = 0; i < handles.size(); ++i)
+        if (handles[i]) keep->Describe(handles[i],expected[i],false);
+    KeelEntityInputRequest request{}; request.size = sizeof(request);
+    request.input = copy.name.data(); request.value = copy.value;
+    request.activator = handles[1]; request.caller = handles[2]; request.value_entity = handles[3];
+    request.queued = queued ? KEEL_TRUE : KEEL_FALSE; request.delay = delay;
+    KeelBool called{};
+    const auto result = keep->input_.dispatch(keep->plugin_,handles[0],&request,&called);
+    invoked = called != KEEL_FALSE;
+    if (called > KEEL_TRUE) throw Error("Host returned an invalid input invocation marker.");
+    Check(result,"Dispatch entity input");
 }
 void Entity::Read(const Field& field, void* output, unsigned size) const {
     const auto keep = service_; const auto handle = handle_, property = field.handle_; const auto expected = identity_;

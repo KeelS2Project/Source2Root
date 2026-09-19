@@ -11,6 +11,7 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 namespace {
 using namespace keels2::host;
@@ -74,6 +75,9 @@ public:
     std::uint32_t next_created{16};
     unsigned construction_mode{}, construction_creates{}, construction_cancels{}, construction_spawns{};
     bool construction_data_valid{};
+    unsigned entity_input_mode{}, entity_input_calls{}, entity_input_direct{}, entity_input_queued{};
+    bool entity_input_valid{true};
+    std::vector<std::string> queued_input_names, queued_input_texts;
     std::shared_ptr<Created> Pending(std::uint64_t token) {
         if (token > UINT32_MAX) return {};
         const auto it = created.find(static_cast<std::uint32_t>(token));
@@ -993,4 +997,65 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureConstructionCount(unsign
     return static_cast<unsigned>(std::count_if(active->created.begin(),active->created.end(),[](const auto& item) {
         return item.second->pending && item.second->identity.epoch == active->entity_epoch;
     }));
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityInput(unsigned version, GameAdapterEntityInputApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {}; if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),1,
+        [](GameAdapter*, unsigned* direct, unsigned* queued) noexcept -> KeelResult {
+            *direct = 511; *queued = 383; return KEEL_RESULT_OK;
+        },
+        [](GameAdapter* base, const GameEntityInputRequest* request, KeelBool* invoked) noexcept -> KeelResult {
+            *invoked = KEEL_FALSE;
+            try {
+                auto& state = *static_cast<Adapter*>(base); std::string error;
+                for (const auto& entity : {request->target,request->activator,request->caller,request->value_entity})
+                    if (entity.epoch && state.ValidateEntity(entity,error) != KEEL_RESULT_OK) return KEEL_RESULT_NOT_FOUND;
+                if (request->queued && request->value.type == KEELS2_INPUT_COLOR) return KEEL_RESULT_UNSUPPORTED;
+                if (state.entity_input_mode == 1) return KEEL_RESULT_NOT_READY;
+                ++state.entity_input_calls; *invoked = KEEL_TRUE;
+                if (state.entity_input_mode == 3) state.Dispatch("sr_input_callback",-1);
+                if (state.entity_input_mode == 4) state.Dispatch("keel plugins unload 2",-1);
+                if (state.entity_input_mode == 5) state.Dispatch("sr_input_recurse",-1);
+                // Inspect after callbacks: input storage must remain readable.
+                bool valid = std::string(request->input) == "Enable" && request->target.source2_handle == 0x23004;
+                if (request->activator.epoch) valid &= request->activator.source2_handle == 0x12003;
+                if (request->caller.epoch) valid &= request->caller.source2_handle == 0x23004;
+                switch (request->value.type) {
+                    case KEELS2_INPUT_VOID: break;
+                    case KEELS2_INPUT_STRING: valid &= std::string(request->value.string_value) == "payload"; break;
+                    case KEELS2_INPUT_BOOL: valid &= request->value.int_value == 1; break;
+                    case KEELS2_INPUT_INT32: valid &= request->value.int_value == -17; break;
+                    case KEELS2_INPUT_FLOAT: valid &= request->value.float_value == 1.25f; break;
+                    case KEELS2_INPUT_VECTOR: valid &= request->value.vector_value[0] == 1 && request->value.vector_value[1] == 2 && request->value.vector_value[2] == 3; break;
+                    case KEELS2_INPUT_ANGLES: valid &= request->value.vector_value[0] == 4 && request->value.vector_value[1] == 5 && request->value.vector_value[2] == 6; break;
+                    case KEELS2_INPUT_COLOR: valid &= request->value.color_value[0] == 10 && request->value.color_value[1] == 20 && request->value.color_value[2] == 30 && request->value.color_value[3] == 255; break;
+                    case KEELS2_INPUT_ENTITY: valid &= request->value_entity.source2_handle == 0x12003; break;
+                    default: valid = false;
+                }
+                state.entity_input_valid &= valid;
+                if (request->queued) {
+                    state.entity_input_queued |= 1u << request->value.type;
+                    state.queued_input_names.emplace_back(request->input);
+                    state.queued_input_texts.emplace_back(request->value.type == KEELS2_INPUT_STRING ? request->value.string_value : "");
+                } else state.entity_input_direct |= 1u << request->value.type;
+                return state.entity_input_mode == 2 ? KEEL_RESULT_ENGINE_FAILURE : KEEL_RESULT_OK;
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureEntityInputMode(unsigned mode) { if (active) active->entity_input_mode = mode; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureEntityInputCount(unsigned kind) {
+    if (!active) return 0;
+    if (kind == 0) return active->entity_input_calls;
+    if (kind == 1) return active->entity_input_direct;
+    if (kind == 2) return active->entity_input_queued;
+    if (kind == 3) return active->entity_input_valid ? 1 : 0;
+    if (kind == 4) {
+        for (const auto& name : active->queued_input_names) if (name != "Enable") return 0;
+        for (const auto& text : active->queued_input_texts) if (!text.empty() && text != "payload") return 0;
+        return static_cast<unsigned>(active->queued_input_names.size());
+    }
+    return 0;
 }

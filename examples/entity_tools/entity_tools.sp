@@ -5,6 +5,7 @@ public bool OnPluginStart()
     return RegisterCommand("sr_entity_stop", "admin.root", Stop, "Set your pawn velocity to zero")
         && RegisterCommand("sr_entity_model", "admin.root", Model, "Set a model entity asset: <index> <model>")
         && RegisterCommand("sr_entity_remove", "admin.root", Remove, "Request entity removal: <index>")
+        && RegisterCommand("sr_entity_input", "admin.root", Input, "Invoke an entity input: <index> <input>")
         && RegisterCommand("sr_entity_spawn", "admin.root", Spawn, "Create a prop: <model> \"x y z\"");
 }
 void Result(Player caller, bool success, const char[] message)
@@ -61,5 +62,19 @@ public void Spawn(Player caller, const char[] arguments)
     if (success) success = Entity_DispatchSpawn(entity,invoked);
     Result(caller,success,"Prop spawned.");
     if (!success && invoked) ReplyToCommand(caller,"Spawn was invoked; this construction cannot be retried.");
+    Entity_Close(entity);
+}
+
+public void Input(Player caller, const char[] arguments)
+{
+    char name[128];
+    if (GetArgumentCount(arguments) != 2 || !GetArgument(arguments,1,name,sizeof(name)))
+    { ReplyToCommand(caller,"Usage: sr_entity_input <index> <input name>"); return; }
+    Entity entity = Target(arguments);
+    if (entity == NoEntity) { Result(caller,false,""); return; }
+    bool invoked;
+    bool success = Entity_InputVoid(entity,name,invoked);
+    Result(caller,success,"Entity input call completed.");
+    if (!success && invoked) ReplyToCommand(caller,"The engine was entered before failure; effects may already have occurred.");
     Entity_Close(entity);
 }

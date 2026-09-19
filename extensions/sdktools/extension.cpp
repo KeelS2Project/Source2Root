@@ -50,13 +50,32 @@ private:
         if (api->size != sizeof(*api) || api->api_version != 1) throw sdk::Error("Incompatible entity construction service.");
         return api;
     }
+    const KeelEntityInputApi* OptionalInput() {
+        const void* raw{};
+        const auto result = HostContext().QueryService(KEELS2_ENTITY_INPUT_SERVICE_NAME,1,&raw);
+        if (result == KEEL_RESULT_NOT_FOUND || result == KEEL_RESULT_UNSUPPORTED) return nullptr;
+        if (result != KEEL_RESULT_OK || !raw) throw sdk::Error("Entity input service query failed.");
+        const auto* api = static_cast<const KeelEntityInputApi*>(raw);
+        if (api->size != sizeof(*api) || api->api_version != 1) throw sdk::Error("Incompatible entity input service.");
+        return api;
+    }
     bool OnExtensionStart() override {
         service_ = std::make_shared<sdk::Service>(HostContext().PluginHandle(),
             Require<KeelEntitiesApi>(KEELS2_ENTITIES_SERVICE_NAME, KEELS2_ENTITIES_API_VERSION),
             Require<KeelSchemaApi>(KEELS2_SCHEMA_SERVICE_NAME, KEELS2_SCHEMA_API_VERSION),
             Require<KeelPlayersApi>(KEELS2_PLAYERS_SERVICE_NAME, KEELS2_PLAYERS_API_VERSION),
-            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION), OptionalWrites(), OptionalTools(), OptionalConstruction());
-        return RegisterNative("Entity_ConstructionAvailable", 0, &SDKTools::ConstructionAvailable)
+            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION), OptionalWrites(), OptionalTools(), OptionalConstruction(), OptionalInput());
+        return RegisterNative("Entity_GetInputCapabilities", 2, &SDKTools::InputCapabilities)
+            && RegisterNative("Entity_InputVoid", 7, &SDKTools::Input<KEELS2_INPUT_VOID>)
+            && RegisterNative("Entity_InputString", 8, &SDKTools::Input<KEELS2_INPUT_STRING>)
+            && RegisterNative("Entity_InputBool", 8, &SDKTools::Input<KEELS2_INPUT_BOOL>)
+            && RegisterNative("Entity_InputInt", 8, &SDKTools::Input<KEELS2_INPUT_INT32>)
+            && RegisterNative("Entity_InputFloat", 8, &SDKTools::Input<KEELS2_INPUT_FLOAT>)
+            && RegisterNative("Entity_InputVector", 8, &SDKTools::Input<KEELS2_INPUT_VECTOR>)
+            && RegisterNative("Entity_InputAngles", 8, &SDKTools::Input<KEELS2_INPUT_ANGLES>)
+            && RegisterNative("Entity_InputColor", 8, &SDKTools::Input<KEELS2_INPUT_COLOR>)
+            && RegisterNative("Entity_InputEntity", 8, &SDKTools::Input<KEELS2_INPUT_ENTITY>)
+            && RegisterNative("Entity_ConstructionAvailable", 0, &SDKTools::ConstructionAvailable)
             && RegisterNative("Entity_Create", 1, &SDKTools::Create)
             && RegisterNative("Entity_IsPending", 1, &SDKTools::Pending)
             && RegisterNative("Entity_SetKeyString", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_STRING>)
@@ -101,6 +120,43 @@ private:
     }
     static sdk::Entity& Entity(NativeCall& call, unsigned index = 1) { return call.Resource<sdk::Entity>(call.Int(index), EntityType); }
     static sdk::Field& Field(NativeCall& call, unsigned index = 2) { return call.Resource<sdk::Field>(call.Int(index), FieldType); }
+    std::int32_t InputCapabilities(NativeCall& call) {
+        call.OutputCell(1,0); call.OutputCell(2,0);
+        return Invoke(call,[&] {
+            const auto service = service_; const auto types = service->InputCapabilities();
+            call.OutputCell(1,static_cast<std::int32_t>(types[0])); call.OutputCell(2,static_cast<std::int32_t>(types[1])); return 1;
+        });
+    }
+    template<unsigned Type> std::int32_t Input(NativeCall& call) {
+        call.OutputCell(3,0); bool invoked{};
+        return Invoke(call,[&] {
+            const auto name = call.String(2); std::string text;
+            KeelEntityInputValue value{}; value.size = sizeof(value); value.type = Type;
+            if constexpr (Type == KEELS2_INPUT_STRING) { text = call.String(4); value.string_value = text.c_str(); }
+            else if constexpr (Type == KEELS2_INPUT_BOOL || Type == KEELS2_INPUT_INT32) value.int_value = call.Int(4);
+            else if constexpr (Type == KEELS2_INPUT_FLOAT) value.float_value = call.Float(4);
+            else if constexpr (Type == KEELS2_INPUT_COLOR) {
+                const auto cells = call.Array(4,4);
+                for (unsigned i = 0; i < 4; ++i) {
+                    if (cells[i] < 0 || cells[i] > 255) throw sdk::Error("Input color components require 0..255.");
+                    value.color_value[i] = static_cast<std::uint8_t>(cells[i]);
+                }
+            } else if constexpr (Type == KEELS2_INPUT_VECTOR || Type == KEELS2_INPUT_ANGLES) {
+                const auto cells = call.Array(4,3);
+                for (unsigned i = 0; i < 3; ++i) value.vector_value[i] = std::bit_cast<float>(cells[i]);
+            }
+            constexpr unsigned offset = Type == KEELS2_INPUT_VOID ? 0 : 1;
+            const auto queue = call.Int(6+offset); const auto delay = call.Float(7+offset);
+            if (queue != 0 && queue != 1) throw sdk::Error("Input queue selection must be false or true.");
+            auto* activator = call.Int(4+offset) ? &Entity(call,4+offset) : nullptr;
+            auto* caller = call.Int(5+offset) ? &Entity(call,5+offset) : nullptr;
+            sdk::Entity* payload{};
+            if constexpr (Type == KEELS2_INPUT_ENTITY) payload = &Entity(call,4);
+            try { Entity(call).Input(name.c_str(),value,invoked,activator,caller,payload,queue != 0,delay); }
+            catch (...) { call.OutputCell(3,invoked ? 1 : 0); throw; }
+            call.OutputCell(3,invoked ? 1 : 0); return 1;
+        });
+    }
     std::int32_t ConstructionAvailable(NativeCall& call) {
         return Invoke(call,[&] { const auto service = service_; service->ConstructionReady(); return 1; });
     }

@@ -4,6 +4,7 @@
 #include <keels2/entity_writes.h>
 #include <keels2/entity_tools.h>
 #include <keels2/entity_construction.h>
+#include <keels2/entity_input.h>
 #include <keels2/native_runtime.h>
 #include <keels2/players.h>
 #include <array>
@@ -44,6 +45,9 @@ public:
     bool Pending() const;
     void SetKey(const KeelEntityKeyValue& value) const;
     void Spawn(bool& invoked) const;
+    void Input(const char* name, const KeelEntityInputValue& value, bool& invoked,
+        const Entity* activator = nullptr, const Entity* caller = nullptr, const Entity* value_entity = nullptr,
+        bool queued = false, float delay = 0) const;
     bool Same(const Entity& other) const;
     std::int32_t Integer(const Field& field) const;
     std::string IntegerText(const Field& field) const;
@@ -77,7 +81,8 @@ private:
 class Service final : public std::enable_shared_from_this<Service> {
 public:
     Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes = nullptr, const KeelEntityToolsApi* tools = nullptr, const KeelEntityConstructionApi* construction = nullptr);
+        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes = nullptr, const KeelEntityToolsApi* tools = nullptr, const KeelEntityConstructionApi* construction = nullptr, const KeelEntityInputApi* input = nullptr);
+    std::array<unsigned,2> InputCapabilities();
     void ConstructionReady() const;
     std::unique_ptr<Entity> Create(const std::string& classname);
     unsigned WriteCapabilities() const;
@@ -103,6 +108,7 @@ private:
     const KeelEntityWritesApi writes_;
     const KeelEntityToolsApi tools_;
     const KeelEntityConstructionApi construction_;
+    const KeelEntityInputApi input_;
     unsigned active_tools_ = 0;
     unsigned active_writes_ = 0;
     unsigned entity_count_ = 0, field_count_ = 0;

@@ -135,3 +135,39 @@ native bool Entity_SetKeyColor(Entity entity, const char[] key, const int value[
 // only drops the handle. Close failed/stale handles too. Map changes invalidate
 // retained identities. Callbacks may close resources while a call is active.
 native bool Entity_DispatchSpawn(Entity entity, bool& invoked);
+
+// Optional host input API1. Bit (1 << EntityInputType) in each output mask
+// identifies supported direct/queued payloads. Outputs are zero on failure.
+enum EntityInputType {
+    EntityInput_Void = 0, EntityInput_String, EntityInput_Bool, EntityInput_Int,
+    EntityInput_Float, EntityInput_Vector, EntityInput_Angles, EntityInput_Color, EntityInput_Entity
+};
+native bool Entity_GetInputCapabilities(int& directTypes, int& queuedTypes);
+// Live owned entities only. NoEntity means absent activator/caller. Names are
+// 1..127 non-control bytes; strings <=4095 bytes, bool 0/1, floats/vectors finite,
+// angles degrees, RGBA components 0..255. Values are copied before callbacks.
+// Delay must be finite and nonnegative, and zero for a direct call. Current
+// CS2 profiles refuse queued colors. Queued engine events survive handle close
+// and plugin unload; the engine manages their map lifetime. They are not owned
+// cancellable timers. There is no Source 1 output ID argument.
+// Invoked is ALWAYS written, including failure; true means engine entry.
+// Success does not prove an input name exists or that an entity survived.
+// Errors after engine entry do not roll back effects. At most 8 active calls.
+native bool Entity_InputVoid(Entity entity, const char[] input, bool& invoked,
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputString(Entity entity, const char[] input, bool& invoked, const char[] value,
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputBool(Entity entity, const char[] input, bool& invoked, bool value,
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputInt(Entity entity, const char[] input, bool& invoked, int value,
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputFloat(Entity entity, const char[] input, bool& invoked, float value,
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputVector(Entity entity, const char[] input, bool& invoked, const float value[3],
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputAngles(Entity entity, const char[] input, bool& invoked, const float value[3],
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputColor(Entity entity, const char[] input, bool& invoked, const int value[4],
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+native bool Entity_InputEntity(Entity entity, const char[] input, bool& invoked, Entity value,
+    Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
