@@ -73,6 +73,7 @@ Frame::Frame(KeelHookFrame& frame, const Definition& definition) : phase_(frame.
         frame.argument_count != definition.arguments.size() || (frame.argument_count && !frame.arguments) ||
         frame.result.type != definition.result || frame.result.reserved || (frame.flags & ~(KH_FRAME_ORIGINAL_CALLED | KH_FRAME_RECALLED)))
         throw Error("Invalid native hook frame.");
+    native_key_ = &frame;
     if (frame.argument_count) arguments_.assign(frame.arguments,frame.arguments + frame.argument_count);
     for (unsigned i = 0; i < arguments_.size(); ++i)
         if (arguments_[i].type != definition.arguments[i] || arguments_[i].reserved)

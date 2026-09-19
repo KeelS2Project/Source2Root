@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "damage_observer",
+  "name": "Typed damage observer",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "sdkhooks.smx",
+  "enabled": false,
+  "dependencies": []
+}

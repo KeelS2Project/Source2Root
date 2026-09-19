@@ -120,7 +120,7 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
             throw Error("Unsupported hook configuration schema.");
         if (!json.at("targets").contains(name)) throw Error("Hook target was not found.");
         const auto& target = json.at("targets").at(name);
-        Keys(target,{"allow_plugins","allow_calls","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments","buffers","entities"});
+        Keys(target,{"allow_plugins","allow_calls","source","module","symbol","pattern","profile","offset","occurrence","method","return","arguments","buffers","entities","sdkhook"});
         const auto& allowed = target.at("allow_plugins");
         if (!allowed.is_array() || allowed.empty() || allowed.size() > 128) throw Error("Hook target requires a plugin allow list.");
         bool permitted = false;
@@ -181,6 +181,14 @@ Definition ReadDefinition(const std::filesystem::path& file, const std::string& 
                 if (argument < 1 || argument > KEELHOOK_MAX_ARGUMENTS) throw Error("Entity argument is out of range.");
                 result.entities.push_back({static_cast<unsigned>(argument),Text(entry,"class")});
             }
+        }
+        if (target.contains("sdkhook")) {
+            const auto& policy = target.at("sdkhook");
+            Keys(policy,{"kind","class","block"});
+            result.entity_hook = {Text(policy,"kind"),Text(policy,"class"),Text(policy,"block")};
+            if (result.entity_hook.kind.empty() || result.entity_hook.kind.size() > 32 ||
+                result.entity_hook.class_name.empty() || result.entity_hook.class_name.size() > 255 ||
+                result.entity_hook.block.size() > 32) throw Error("Invalid SDKHooks target policy.");
         }
         Validate(result); return result;
     } catch (const Error&) { throw; }

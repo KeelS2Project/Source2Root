@@ -115,6 +115,12 @@ int main(int argc, char** argv) {
             Copy(std::filesystem::path(argv[7]).parent_path() / "topmenus_contributor.smx", script / "plugins/top_other/main.smx");
             std::ofstream(script / "plugins/top_other/plugin.json") << R"({"schema":1,"id":"top_other","name":"Top menu contributor","author":"tests","version":"1.0.0","api":2,"entry":"main.smx","enabled":true,"dependencies":[]})";
         }
+        if (argc == 12 && std::string(argv[10]) == "sdkhooks") {
+            const auto directory = script / "configs/extensions/source2root.sdkhooks";
+            std::filesystem::create_directories(directory);
+            std::ofstream(directory / "targets.json") << R"({"schema":1,"targets":{"damage":{"allow_plugins":["hello"],"source":"symbol","module":")"
+                << adapter_name << R"(","symbol":"SrFixtureDamageTarget","method":true,"return":"void","arguments":["pointer","pointer","pointer"],"sdkhook":{"kind":"damage","class":"CCSPlayerPawn","block":"preserve_result"}}}})";
+        }
         if (argc == 12 && (std::string(argv[10]) == "dhooks" || std::string(argv[10]) == "sdkcall")) {
             const auto directory = script / "configs/extensions/source2root.dhooks";
             std::filesystem::create_directories(directory);
@@ -355,6 +361,28 @@ int main(int argc, char** argv) {
             Check(occurrences("PERSISTENT_CLEANUP_OK") == 3 && !contains("PERSISTENT_FAILED"),"persistent lifecycle has no failures");
             std::cout << messages() << "Persistent callback module lifecycle passed\n";
             return 0;
+        }
+        if (argc == 12 && std::string(argv[10]) == "sdkhooks") {
+            auto damage = adapter.Get<int (*)()>("SrFixtureDamageInvoke");
+            auto epoch = adapter.Get<void (*)()>("SrFixtureEntityEpoch");
+            Check(contains("SDKHOOKS_READY"),"typed module and script load");
+            Check(damage() == 12 && contains("SDKHOOKS_PRE_OK") && contains("SDKHOOKS_POST_OK"),"typed edit crosses actual native detour and SourcePawn callback");
+            run("sr plugins pause hello"); Check(damage() == 42,"paused script leaves original damage"); run("sr plugins resume hello");
+            run("sr_sdkhook_continue"); Check(damage() == 42,"continue discards edits");
+            run("sr_sdkhook_block"); Check(damage() == -1,"block preserves output and skips original");
+            run("sr_sdkhook_close"); Check(damage() == 12,"active callback can close own registration and finish"); frame();
+            Check(damage() == 42,"closed registration becomes inert");
+            run("sr_sdkhook_stale"); Check(contains("SDKHooks frame is stale"),"stored frame cannot escape callback");
+            run("sr plugins reload hello"); frame(); Check(damage() == 12,"reload creates fresh hook");
+            run("sr_sdkhook_fault"); Check(damage() == 42,"script fault discards staged damage"); frame(); Check(damage() == 42,"fault retires callback");
+            run("sr plugins reload hello"); frame(); epoch(); Check(damage() == 42,"old map identity never retargets");
+            run("sr plugins reload hello"); frame(); Check(damage() == 12,"new registration captures current epoch");
+            run("keel plugins unload 2"); Check(contains("plugin unload is blocked"),"script retains hook provider");
+            run("sr plugins unload hello"); frame(); Check(damage() == 42,"script unload restores original");
+            run("keel plugins unload 2"); run("keel plugins load sr_example"); run("sr plugins load hello"); frame();
+            Check(damage() == 12,"provider reload reacquires typed native services"); run("sr plugins unload hello"); frame();
+            Check(!contains("SDKHOOKS_FAILED"),"script checks succeed"); Check(stop(),"SDKHooks host shutdown releases leases"); Check(network_stop(),"SDKHooks fixture teardown");
+            std::cout << messages() << "SDKHooks native module lifecycle passed\n"; return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "sdkcall") {
             auto scalar = adapter.Get<std::int32_t (*)(std::int32_t,float)>("SrFixtureHookScalar");

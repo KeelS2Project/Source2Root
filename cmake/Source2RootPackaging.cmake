@@ -10,7 +10,7 @@ set(SR_PACKAGE_MODULES "")
 set(SR_PACKAGE_LIBRARIES "")
 set(SR_PACKAGE_DEPENDENCIES "")
 
-foreach(name random database clientprefs geoip regex http sdktools cstrike dhooks topmenus)
+foreach(name random database clientprefs geoip regex http sdktools cstrike dhooks sdkhooks topmenus)
     set(target "source2root_${name}")
     if(TARGET ${target})
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

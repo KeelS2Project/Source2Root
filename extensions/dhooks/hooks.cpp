@@ -191,7 +191,7 @@ KeelHookAction Service::Dispatch(KeelHookFrame* frame, void* raw) noexcept {
         ++registration->active; ++self->depth_;
         Frame snapshot(*frame,registration->target->definition);
         const auto action = registration->callback(snapshot);
-        if (action == -2) self->Close(*registration);
+        if (action == -2 || snapshot.retire_) self->Close(*registration);
         if (action < 0 || action > KH_ACTION_SUPERSEDE || (snapshot.Phase() == KH_PHASE_POST && action == KH_ACTION_SUPERSEDE))
             return KH_ACTION_CONTINUE;
         self->CheckBufferEdits(*frame,snapshot);

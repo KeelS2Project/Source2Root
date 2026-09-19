@@ -729,3 +729,54 @@ std::int32_t SrFixtureEntityMethod(void* entity, std::int32_t value, char* text,
     std::memcpy(text,"changed",8);
     return *static_cast<std::int32_t*>(entity) + value;
 }
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityCapture(
+    unsigned version, GameAdapterEntityCaptureApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {}; if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),1,[](GameAdapter* adapter,const void* pointer,GameEntityIdentity* out) noexcept -> KeelResult {
+        if (!adapter || !out) return KEEL_RESULT_INVALID_ARGUMENT; *out = {};
+        try { auto& state = *static_cast<Adapter*>(adapter); std::string error;
+            const unsigned refs[]{0x12003,0x23004,0x45005};
+            for (unsigned i = 0; i < 3; ++i) if (pointer == &state.entity_objects[i]) return state.FindEntityBySource2Handle(refs[i],*out,error);
+            return KEEL_RESULT_NOT_FOUND;
+        } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+    }}; return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityHookData(
+    unsigned version, GameAdapterEntityHookDataApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {}; if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),1,
+        [](GameAdapter*,const void* record,KeelDamageInfo* out) noexcept -> KeelResult {
+            if (!record || !out || out->size != sizeof(*out)) return KEEL_RESULT_INVALID_ARGUMENT;
+            *out = *static_cast<const KeelDamageInfo*>(record); return KEEL_RESULT_OK;
+        },
+        [](GameAdapter*,void* record,const KeelDamageEdit* edit) noexcept -> KeelResult {
+            if (!record || !edit || edit->size != sizeof(*edit)) return KEEL_RESULT_INVALID_ARGUMENT;
+            auto& damage = *static_cast<KeelDamageInfo*>(record); damage.damage = edit->damage; damage.damage_type = edit->damage_type;
+            std::copy_n(edit->force,3,damage.force); std::copy_n(edit->position,3,damage.position); return KEEL_RESULT_OK;
+        },
+        [](GameAdapter*,const GameEntityIdentity*,const void*,KeelBool* out) noexcept -> KeelResult {
+            if (out) *out = KEEL_FALSE; return KEEL_RESULT_UNSUPPORTED;
+        }}; return KEEL_RESULT_OK;
+}
+namespace { unsigned sdkhook_damage_calls = 0; float sdkhook_damage_value = 0; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+void SrFixtureDamageTarget(void* entity, KeelDamageInfo* damage, void* result) {
+    if (!active || entity != &active->entity_objects[1] || !damage || !result) std::abort();
+    ++sdkhook_damage_calls; sdkhook_damage_value = damage->damage;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT int SrFixtureDamageInvoke() {
+    if (!active) return -100;
+    KeelDamageInfo damage{sizeof(damage),0,42,0x80000040,-7,0x45005,UINT32_MAX,UINT32_MAX,{1,2,3},{4,5,6}};
+    const auto before = sdkhook_damage_calls; std::uint64_t result = 0x1122334455667788ull;
+    SrFixtureDamageTarget(&active->entity_objects[1],&damage,&result);
+    if (result != 0x1122334455667788ull || damage.damage_custom != -7 || damage.inflictor != 0x45005) return -101;
+    return sdkhook_damage_calls == before ? -1 : static_cast<int>(sdkhook_damage_value);
+}

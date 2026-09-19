@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+namespace source2root::sdkhooks { class Service; }
 namespace source2root::dhooks {
 class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
 enum class BufferKind { string, int32, vector3 };
@@ -19,6 +20,7 @@ struct BufferSpec {
     BufferKind kind = BufferKind::string;
 };
 struct EntitySpec { unsigned argument = 0; std::string class_name; };
+struct EntityHookPolicy { std::string kind, class_name, block; };
 struct Definition {
     unsigned source = 0, result = KH_VALUE_VOID;
     bool method = false, allow_calls = false;
@@ -28,6 +30,7 @@ struct Definition {
     std::vector<KeelHookValueType> arguments;
     std::vector<BufferSpec> buffers;
     std::vector<EntitySpec> entities;
+    EntityHookPolicy entity_hook;
 };
 Definition ReadDefinition(const std::filesystem::path& file, const std::string& name, const std::string& script);
 void Validate(const Definition& definition);
@@ -68,6 +71,9 @@ public:
 private:
     friend class Service;
     friend class Call;
+    friend class source2root::sdkhooks::Service;
+    const void* native_key_ = nullptr;
+    bool retire_ = false;
     explicit Frame(const Definition& definition);
     explicit Frame(KeelHookFrame& frame, const Definition& definition);
     void Commit(KeelHookFrame& frame, unsigned action) const;

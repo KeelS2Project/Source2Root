@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "targets": {
+    "example_damage": {
+      "allow_plugins": ["damage_observer"],
+      "source": "profile",
+      "symbol": "reviewed_damage_target_placeholder",
+      "method": true,
+      "return": "void",
+      "arguments": ["pointer", "pointer", "pointer"],
+      "sdkhook": {
+        "kind": "damage",
+        "class": "CCSPlayerPawn",
+        "block": "preserve_result"
+      }
+    }
+  }
+}
