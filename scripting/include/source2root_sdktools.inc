@@ -15,8 +15,9 @@ enum SchemaType
 // Game-thread operations through Keel's entity/schema services. Availability,
 // field names and types depend on the active game adapter and compatibility
 // profile. No raw memory addresses or guessed offsets are exposed. This
-// SDKTools layer provides typed reads/writes; it does not implement spawning,
-// teleportation, tracing, sound, temp entities or the SourceMod SDKCall API.
+// SDKTools provides typed reads/writes and entity teleport/model/removal.
+// Spawning, tracing, sound and temp entities require further game services.
+// Checked SDKCall is provided separately by source2root_sdkcall.inc.
 // Handles belong to this script generation and are closed on reload/unload.
 // Entity identity includes the engine serial and map epoch; retained entities
 // never silently retarget when an index is reused. Close stale entities too.
@@ -76,3 +77,29 @@ native bool Entity_WriteIntegerText(Entity entity, SchemaField field, const char
 // Float64 fields receive the exact widening of SourcePawn's finite float32.
 native bool Entity_WriteFloat(Entity entity, SchemaField field, float value);
 native bool Entity_WriteVector(Entity entity, SchemaField field, const float value[3]);
+
+#define ENTITY_TOOL_TELEPORT 1
+#define ENTITY_TOOL_SET_MODEL 2
+#define ENTITY_TOOL_REMOVE 4
+#define ENTITY_TELEPORT_POSITION 1
+#define ENTITY_TELEPORT_ANGLES 2
+#define ENTITY_TELEPORT_VELOCITY 4
+#define ENTITY_TELEPORT_ALL 7
+// Optional host keels2.entity_tools API1. Output mask is zero on failure.
+// Available operations depend on the reviewed game binary and entity class.
+native bool Entity_GetToolCapabilities(int& capabilities);
+// Sets the selected values through the actual entity class's teleport method.
+// At least one flag is required; selected vectors must contain finite values.
+// Unselected arrays are not read. Angles are pitch/yaw/roll in degrees.
+native bool Entity_Teleport(Entity entity, const float position[3], const float angles[3],
+    const float velocity[3], int flags = ENTITY_TELEPORT_ALL);
+// Engine model asset name, 1..511 bytes without control characters. Requires a
+// model entity; asset availability and precaching follow the game's rules.
+native bool Entity_SetModel(Entity entity, const char[] model);
+// Requests engine removal, which may be deferred. The owned handle remains
+// allocated: close it with Entity_Close, even after its entity becomes invalid.
+native bool Entity_Remove(Entity entity);
+// These game operations can invoke callbacks and destroy their target entity.
+// Success means the engine operation was invoked, not that the entity survived
+// or an asset loaded. Failures after callbacks do not roll back game effects.
+// Calls retain provider/service state across callbacks; at most 8 operations may be active.

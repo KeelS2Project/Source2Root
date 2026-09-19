@@ -1,4 +1,5 @@
 #include <keels2/round_control.h>
+#include <keels2/entity_tools.h>
 #include <keels2/player_management.h>
 #include <keels2/player_actions.h>
 #include <keels2/player_input.h>
@@ -623,6 +624,37 @@ int main(int argc, char** argv) {
             Check(contains("SDKTOOLS_WRITE_ERROR_OK") && write_count() == 9,"write failure reaches script");
             write_state(1,KEEL_RESULT_OK,true); run("sr_sdk_write_callback");
             Check(contains("SDKTOOLS_WRITE_CALLBACK_OK") && write_count() == 11,"nested callback closes active Entity/Field without invalid access");
+            const auto tool_state = adapter.Get<void (*)(unsigned,unsigned,unsigned,unsigned)>("SrFixtureToolState");
+            const auto tool_count = adapter.Get<unsigned (*)()>("SrFixtureToolCount");
+            const auto tool_data = adapter.Get<bool (*)(KeelEntityTeleport*,char*,unsigned)>("SrFixtureToolData");
+            const auto restore_entities = adapter.Get<void (*)()>("SrFixtureRestoreEntities");
+            KeelEntityTeleport teleported{}; char asset[512]{};
+            Check(tool_count() == 0,"SDKTools initialization has no game side effects");
+            run("sr_sdk_tools");
+            Check(contains("SDKTOOLS_TOOLS_OK") && tool_count() == 4,"script teleport/model/remove execute through actual host");
+            Check(tool_data(&teleported,asset,sizeof(asset)) && teleported.flags == 4 && teleported.position[0] == 0 &&
+                teleported.velocity[0] == 7 && std::string(asset) == "models/test.vmdl","selected vectors and model payload");
+            restore_entities(); tool_state(0,KEEL_RESULT_OK,KEEL_RESULT_OK,0); run("sr_sdk_tool_unavailable");
+            Check(contains("SDKTOOLS_TOOL_UNAVAILABLE_OK") && tool_count() == 4,"unsupported operations have no game calls");
+            tool_state(7,KEEL_RESULT_ENGINE_FAILURE,KEEL_RESULT_OK,0); run("sr_sdk_tool_cap_error");
+            Check(contains("SDKTOOLS_TOOL_CAP_ERROR_OK") && tool_count() == 4,"capability errors zero script output");
+            tool_state(7,KEEL_RESULT_OK,KEEL_RESULT_ENGINE_FAILURE,0); run("sr_sdk_tool_error");
+            Check(contains("SDKTOOLS_TOOL_ERROR_OK") && tool_count() == 5,"engine errors propagate without pretending rollback");
+            for (unsigned kind : {1u,2u,4u}) {
+                tool_state(7,KEEL_RESULT_OK,KEEL_RESULT_OK,1);
+                run("sr_sdk_tool_callback " + std::to_string(kind));
+            }
+            Check(occurrences("SDKTOOLS_TOOL_CALLBACK_OK") == 3 && tool_count() == 8 && contains("plugin unload is blocked"),
+                "callbacks close active entities and provider unload is refused during game calls");
+            Check(tool_data(&teleported,asset,sizeof(asset)) && teleported.flags == 1 && teleported.position[0] == 11 &&
+                std::string(asset) == "models/held.vmdl","script buffers copied before callback mutates source storage");
+            restore_entities(); tool_state(7,KEEL_RESULT_OK,KEEL_RESULT_ENGINE_FAILURE,1); run("sr_sdk_tool_callback_error");
+            Check(occurrences("SDKTOOLS_TOOL_CALLBACK_OK") == 4 && tool_count() == 9,"engine error after callback closes the active resource");
+            tool_state(7,KEEL_RESULT_OK,KEEL_RESULT_OK,3); run("sr_sdk_tool_cap_close");
+            Check(occurrences("SDKTOOLS_TOOL_CALLBACK_OK") == 5 && tool_count() == 9,"close during capability lookup prevents game call");
+            tool_state(7,KEEL_RESULT_OK,KEEL_RESULT_OK,2); run("sr_sdk_tool_recursion");
+            Check(contains("SDKTOOLS_TOOL_RECURSION_OK") && tool_count() == 17,"recursive script game calls bounded at8");
+            tool_state(7,KEEL_RESULT_OK,KEEL_RESULT_OK,0);
             run("sr_sdk_wrong");
             Check(contains("Foreign extension or wrong resource type."), "wrong entity resource type raises native error");
             run("sr_sdk_stale");
@@ -639,12 +671,16 @@ int main(int argc, char** argv) {
             run("sr plugins resume hello");
             run("sr plugins reload hello");
             run("sr_sdk_check");
+            run("sr_sdk_tools"); restore_entities();
+            Check(occurrences("SDKTOOLS_TOOLS_OK") == 2 && tool_count() == 21,"script reload rebinds entity tools");
             Check(occurrences("SDKTOOLS_SCRIPT_OK") == 2 && !contains("SDKTOOLS_FAILED"), "script reload succeeds with new generation and releases old resources");
             run("sr plugins unload hello");
             run("keel plugins unload 2");
             run("keel plugins load sr_example");
             run("sr plugins load hello");
             run("sr_sdk_check");
+            run("sr_sdk_tools"); restore_entities();
+            Check(occurrences("SDKTOOLS_TOOLS_OK") == 3 && tool_count() == 25,"provider reload rebinds entity tools");
             Check(occurrences("SDKTOOLS_SCRIPT_OK") == 3 && !contains("SDKTOOLS_FAILED"), "SDKTools provider reload rebinds script natives");
             run("sr plugins unload hello");
             Check(stop(), "SDKTools host stop after script cleanup");

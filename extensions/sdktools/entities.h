@@ -2,6 +2,7 @@
 
 #include <keels2/entities.h>
 #include <keels2/entity_writes.h>
+#include <keels2/entity_tools.h>
 #include <keels2/native_runtime.h>
 #include <keels2/players.h>
 #include <array>
@@ -45,6 +46,10 @@ public:
     float Number(const Field& field) const;
     std::array<float, 3> Vector(const Field& field) const;
     std::uint32_t SourceHandle(const Field& field) const;
+    void Teleport(unsigned flags, const std::array<float,3>& position,
+        const std::array<float,3>& angles, const std::array<float,3>& velocity) const;
+    void SetModel(const std::string& model) const;
+    void Remove() const;
     void SetInteger(const Field& field, std::int32_t value) const;
     void SetIntegerText(const Field& field, const std::string& value) const;
     void SetNumber(const Field& field, float value) const;
@@ -54,6 +59,7 @@ private:
     friend class Service;
     Entity(std::shared_ptr<Service> service, KeelEntityHandle handle);
     void Read(const Field& field, void* output, unsigned size) const;
+    void Tool(unsigned kind, const KeelEntityTeleport* request, const char* model) const;
     void Write(const Field& field, const void* value, unsigned size) const;
     std::shared_ptr<Service> service_;
     KeelEntityHandle handle_ = 0;
@@ -66,8 +72,9 @@ private:
 class Service final : public std::enable_shared_from_this<Service> {
 public:
     Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes = nullptr);
+        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes = nullptr, const KeelEntityToolsApi* tools = nullptr);
     unsigned WriteCapabilities() const;
+    unsigned ToolCapabilities() const;
     std::unique_ptr<Entity> Find(int index);
     std::unique_ptr<Entity> FromSource(std::uint32_t handle);
     std::unique_ptr<Entity> FromPlayer(const KeelPlayerConnection& player, bool pawn);
@@ -86,6 +93,8 @@ private:
     const KeelPlayersApi players_;
     const KeelNativeRuntimeApi runtime_;
     const KeelEntityWritesApi writes_;
+    const KeelEntityToolsApi tools_;
+    unsigned active_tools_ = 0;
     unsigned active_writes_ = 0;
     unsigned entity_count_ = 0, field_count_ = 0;
 };

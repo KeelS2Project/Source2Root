@@ -103,8 +103,8 @@ IntegerValue ParseInteger(const std::string& text) {
 
 }
 Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes)
-    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime), writes_(writes ? *writes : KeelEntityWritesApi{}) {
+        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes, const KeelEntityToolsApi* tools)
+    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime), writes_(writes ? *writes : KeelEntityWritesApi{}), tools_(tools ? *tools : KeelEntityToolsApi{}) {
     if (!plugin || entities.size != sizeof(entities) || entities.api_version != KEELS2_ENTITIES_API_VERSION ||
         !entities.find_by_index || !entities.find_by_source2_handle || !entities.release || !entities.describe || !entities.equal || !entities.read_field ||
         schema.size != sizeof(schema) || schema.api_version != KEELS2_SCHEMA_API_VERSION ||
@@ -114,6 +114,8 @@ Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const
         throw Error("Incompatible entity/schema/player services.");
     if (writes && (writes->size != sizeof(*writes) || writes->api_version != KEELS2_ENTITY_WRITES_API_VERSION ||
         !writes->capabilities || !writes->write_field)) throw Error("Incompatible entity write service.");
+    if (tools && (tools->size != sizeof(*tools) || tools->api_version != KEELS2_ENTITY_TOOLS_API_VERSION ||
+        !tools->capabilities || !tools->teleport || !tools->set_model || !tools->remove)) throw Error("Incompatible entity tools service.");
 }
 void Service::Thread() const { Check(runtime_.check_game_thread(plugin_), "Entity operation"); }
 unsigned Service::WriteCapabilities() const {
@@ -122,6 +124,14 @@ unsigned Service::WriteCapabilities() const {
     unsigned capabilities = 0;
     Check(writes_.capabilities(plugin_, &capabilities), "Entity write capabilities");
     return capabilities & KEELS2_ENTITY_WRITE_NUMERIC_FIELDS;
+}
+unsigned Service::ToolCapabilities() const {
+    const auto keep = shared_from_this();
+    keep->Thread();
+    if (!keep->tools_.capabilities) throw Error("Entity tools service is unavailable.");
+    unsigned capabilities = 0;
+    Check(keep->tools_.capabilities(keep->plugin_, &capabilities), "Entity tools capabilities");
+    return capabilities & (KEELS2_ENTITY_TOOL_TELEPORT | KEELS2_ENTITY_TOOL_SET_MODEL | KEELS2_ENTITY_TOOL_REMOVE);
 }
 std::unique_ptr<Entity> Service::Adopt(KeelEntityHandle handle) {
     if (!handle) throw Error("Host returned an empty entity handle.");
@@ -263,6 +273,49 @@ void Entity::Write(const Field& field, const void* value, unsigned size) const {
     // Do not access Entity/Field members after this call, even on failure.
     Check(service->writes_.write_field(service->plugin_, entity, property, value, size), "Write entity field");
 }
+void Entity::Tool(unsigned kind, const KeelEntityTeleport* request, const char* model) const {
+    // Any host call may reenter scripts and destroy this Entity or its caller.
+    // Capture everything first; retain the service through callback completion.
+    auto service = service_;
+    const auto entity = handle_;
+    const auto expected = identity_;
+    if (!entity) throw Error("Entity handle is closed.");
+    service->Thread();
+    if (service->active_tools_ >= 8) throw Error("Entity operation recursion limit (8) reached.");
+    struct Hold { unsigned& count; explicit Hold(unsigned& value) : count(value) { ++count; } ~Hold() { --count; } } hold(service->active_tools_);
+    if (!(service->ToolCapabilities() & kind)) throw Error("Entity operation is unsupported by this game build.");
+    KeelEntityInfo current{sizeof(current), -1, KEELS2_INVALID_SOURCE2_ENTITY_HANDLE, 0, 0};
+    Check(service->entities_.describe(service->plugin_,entity,&current), "Validate entity operation");
+    if (!Identity(expected,current)) throw Error("Entity identity changed before the operation.");
+    if (kind == KEELS2_ENTITY_TOOL_TELEPORT)
+        Check(service->tools_.teleport(service->plugin_,entity,request), "Teleport entity");
+    else if (kind == KEELS2_ENTITY_TOOL_SET_MODEL)
+        Check(service->tools_.set_model(service->plugin_,entity,model), "Set entity model");
+    else Check(service->tools_.remove(service->plugin_,entity), "Remove entity");
+}
+void Entity::Teleport(unsigned flags, const std::array<float,3>& position,
+    const std::array<float,3>& angles, const std::array<float,3>& velocity) const {
+    if (!flags || (flags & ~7u)) throw Error("Teleport requires position, angles or velocity flags.");
+    KeelEntityTeleport request{}; request.size = sizeof(request); request.flags = flags;
+    const std::array<float,3>* inputs[]{&position,&angles,&velocity};
+    float* outputs[]{request.position,request.angles,request.velocity};
+    for (unsigned i = 0; i < 3; ++i) if (flags & (1u<<i))
+        for (unsigned j = 0; j < 3; ++j) {
+            const float value = (*inputs[i])[j];
+            if (!std::isfinite(value)) throw Error("Teleport requires finite selected vectors.");
+            outputs[i][j] = value;
+        }
+    Tool(KEELS2_ENTITY_TOOL_TELEPORT,&request,nullptr);
+}
+void Entity::SetModel(const std::string& model) const {
+    // Copy before host entry; the input can belong to a callback-owned resource.
+    const auto asset = model;
+    if (asset.empty() || asset.size() > KEELS2_ENTITY_MODEL_MAX_BYTES ||
+        std::any_of(asset.begin(),asset.end(),[](unsigned char c) { return c < 32 || c == 127; }))
+        throw Error("Model asset requires 1..511 bytes without control characters.");
+    Tool(KEELS2_ENTITY_TOOL_SET_MODEL,nullptr,asset.c_str());
+}
+void Entity::Remove() const { Tool(KEELS2_ENTITY_TOOL_REMOVE,nullptr,nullptr); }
 void Entity::SetInteger(const Field& field, std::int32_t value) const {
     const auto bytes = IntegerBytes(field.type_, IntegerValue{std::int64_t{value}});
     Write(field, bytes.data(), field.size_);

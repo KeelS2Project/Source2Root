@@ -8,7 +8,7 @@ using source2root::NativeCall;
 namespace sdk = source2root::sdktools;
 class SDKTools final : public source2root::Extension {
 public:
-    static constexpr PluginInfo Info{"Source2Root SDKTools", "KeelS2 Project", "1.0.0", "Owned entity handles and typed schema access"};
+    static constexpr PluginInfo Info{"Source2Root SDKTools", "KeelS2 Project", "1.0.0", "Owned entities, schema access and game operations"};
     static constexpr PluginRequirement Requirements[]{{"Source2Root", "1.0.0", DependencyRequirement::exact}};
     SDKTools() : Extension("source2root.sdktools") {}
 private:
@@ -32,12 +32,21 @@ private:
         if (api->size != sizeof(*api) || api->api_version != KEELS2_ENTITY_WRITES_API_VERSION) throw sdk::Error("Incompatible entity write service table.");
         return api;
     }
+    const KeelEntityToolsApi* OptionalTools() {
+        const void* raw = nullptr;
+        const auto result = HostContext().QueryService(KEELS2_ENTITY_TOOLS_SERVICE_NAME, KEELS2_ENTITY_TOOLS_API_VERSION, &raw);
+        if (result == KEEL_RESULT_NOT_FOUND || result == KEEL_RESULT_UNSUPPORTED) return nullptr;
+        if (result != KEEL_RESULT_OK || !raw) throw sdk::Error("Entity tools service query failed.");
+        const auto* api = static_cast<const KeelEntityToolsApi*>(raw);
+        if (api->size != sizeof(*api) || api->api_version != KEELS2_ENTITY_TOOLS_API_VERSION) throw sdk::Error("Incompatible entity tools service table.");
+        return api;
+    }
     bool OnExtensionStart() override {
         service_ = std::make_shared<sdk::Service>(HostContext().PluginHandle(),
             Require<KeelEntitiesApi>(KEELS2_ENTITIES_SERVICE_NAME, KEELS2_ENTITIES_API_VERSION),
             Require<KeelSchemaApi>(KEELS2_SCHEMA_SERVICE_NAME, KEELS2_SCHEMA_API_VERSION),
             Require<KeelPlayersApi>(KEELS2_PLAYERS_SERVICE_NAME, KEELS2_PLAYERS_API_VERSION),
-            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION), OptionalWrites());
+            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION), OptionalWrites(), OptionalTools());
         return RegisterNative("Entity_Find", 1, &SDKTools::Find)
             && RegisterNative("Entity_FromHandle", 1, &SDKTools::FromHandle)
             && RegisterNative("Entity_FromPlayer", 2, &SDKTools::FromPlayer)
@@ -61,7 +70,11 @@ private:
             && RegisterNative("Entity_WriteInt", 3, &SDKTools::SetInteger)
             && RegisterNative("Entity_WriteIntegerText", 3, &SDKTools::SetIntegerText)
             && RegisterNative("Entity_WriteFloat", 3, &SDKTools::SetNumber)
-            && RegisterNative("Entity_WriteVector", 3, &SDKTools::SetVector);
+            && RegisterNative("Entity_WriteVector", 3, &SDKTools::SetVector)
+            && RegisterNative("Entity_GetToolCapabilities", 1, &SDKTools::ToolCapabilities)
+            && RegisterNative("Entity_Teleport", 5, &SDKTools::Teleport)
+            && RegisterNative("Entity_SetModel", 2, &SDKTools::SetModel)
+            && RegisterNative("Entity_Remove", 1, &SDKTools::Remove);
     }
     template <typename Function> static std::int32_t Invoke(NativeCall& call, Function function, int failure = 0) {
         try { return function(); } catch (const sdk::Error& error) { return call.Fail(error.what(), failure); }
@@ -143,6 +156,26 @@ private:
         call.OutputCell(1, 0);
         return Invoke(call, [&] { call.OutputCell(1, service_->WriteCapabilities()); return 1; });
     }
+    std::int32_t ToolCapabilities(NativeCall& call) {
+        call.OutputCell(1,0);
+        return Invoke(call,[&] { const auto service = service_; call.OutputCell(1,service->ToolCapabilities()); return 1; });
+    }
+    std::int32_t Teleport(NativeCall& call) {
+        return Invoke(call,[&] {
+            const auto flags = static_cast<unsigned>(call.Int(5));
+            if (!flags || (flags & ~7u)) throw sdk::Error("Teleport requires position, angles or velocity flags.");
+            std::array<std::array<float,3>,3> vectors{};
+            for (unsigned i = 0; i < 3; ++i) if (flags & (1u<<i)) {
+                const auto cells = call.Array(i+2,3);
+                for (unsigned j = 0; j < 3; ++j) vectors[i][j] = std::bit_cast<float>(cells[j]);
+            }
+            Entity(call).Teleport(flags,vectors[0],vectors[1],vectors[2]); return 1;
+        });
+    }
+    std::int32_t SetModel(NativeCall& call) {
+        return Invoke(call,[&] { const auto model = call.String(2); Entity(call).SetModel(model); return 1; });
+    }
+    std::int32_t Remove(NativeCall& call) { return Invoke(call,[&] { Entity(call).Remove(); return 1; }); }
     std::int32_t SetInteger(NativeCall& call) {
         return Invoke(call, [&] { Entity(call).SetInteger(Field(call), call.Int(3)); return 1; });
     }

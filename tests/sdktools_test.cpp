@@ -26,7 +26,11 @@ struct Fixture {
     unsigned mutation = 0, metadata_fault = 0, reads = 0, writes = 0, write_caps = 1;
     KeelResult write_status = KEEL_RESULT_OK, caps_status = KEEL_RESULT_OK;
     std::vector<std::byte> last_write;
-    std::function<void()> on_write;
+    std::function<void()> on_write, on_tool, on_tool_caps;
+    unsigned tool_calls = 0, tool_kind = 0, tool_caps = 7;
+    KeelResult tool_status = KEEL_RESULT_OK, tool_caps_status = KEEL_RESULT_OK;
+    KeelEntityTeleport last_teleport{};
+    std::string last_model;
     bool wrong_identity = false, bad_bool = false, nonfinite = false;
     KeelResult available = KEEL_RESULT_OK;
     std::string profile = "fixture-v1";
@@ -146,12 +150,33 @@ struct Fixture {
         if (callback) callback();
         return s.write_status;
     }
+    static KeelResult ToolCapabilities(KeelPluginHandle owner, unsigned* flags) {
+        if (Thread(owner) != KEEL_RESULT_OK) return KEEL_RESULT_WRONG_THREAD;
+        const auto callback = active->on_tool_caps; if (callback) callback();
+        *flags = active->tool_caps; return active->tool_caps_status;
+    }
+    static KeelResult Tool(KeelPluginHandle owner, KeelEntityHandle entity, unsigned kind,
+        const KeelEntityTeleport* request, const char* model) {
+        auto& s = *active; KeelEntityInfo info{};
+        if (Describe(owner,entity,&info)) return KEEL_RESULT_NOT_FOUND;
+        ++s.tool_calls; s.tool_kind = kind;
+        const auto callback = s.on_tool; if (callback) callback();
+        // Copy after callbacks, proving caller input storage remains valid.
+        if (request) s.last_teleport = *request;
+        if (model) s.last_model = model;
+        if (kind == KEELS2_ENTITY_TOOL_REMOVE) s.entities.erase(entity);
+        return s.tool_status;
+    }
+    static inline const KeelEntityToolsApi tools_api{sizeof(KeelEntityToolsApi),1,ToolCapabilities,
+        [](KeelPluginHandle p,KeelEntityHandle e,const KeelEntityTeleport* t) { return Tool(p,e,1,t,nullptr); },
+        [](KeelPluginHandle p,KeelEntityHandle e,const char* model) { return Tool(p,e,2,nullptr,model); },
+        [](KeelPluginHandle p,KeelEntityHandle e) { return Tool(p,e,4,nullptr,nullptr); }};
     static inline const KeelEntityWritesApi writes_api{sizeof(KeelEntityWritesApi),1,Capabilities,Write};
     static inline const KeelEntitiesApi entity_api{sizeof(KeelEntitiesApi), 1, ByIndex, Find, Release, Describe, Equal, Read};
     static inline const KeelSchemaApi schema_api{sizeof(KeelSchemaApi), 1, Resolve, ReleaseField, DescribeField};
     static inline const KeelPlayersApi player_api{sizeof(KeelPlayersApi), 1, nullptr, nullptr, Player};
     static inline const KeelNativeRuntimeApi runtime_api{sizeof(KeelNativeRuntimeApi), 1, Thread, nullptr, nullptr, nullptr};
-    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api, &writes_api); }
+    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api, &writes_api, &tools_api); }
 };
 Fixture* Fixture::active = nullptr;
 }
@@ -295,6 +320,81 @@ int main() {
             Reject([&] { entity->SetInteger(*field,1); }, "older host reports writes unavailable");
         }
         Check(fixture.entities.empty() && fixture.fields.empty() && service->EntityCount() == 0 && service->FieldCount() == 0,"write paths release every resource");
+        {
+            auto tools = fixture.ServiceFor(); auto entity = tools->Find(4);
+            std::array<float,3> position{1,2,3}, angles{4,5,6}, velocity{7,8,9};
+            Check(tools->ToolCapabilities() == 7,"entity tool capabilities");
+            for (unsigned flags = 1; flags <= 7; ++flags) {
+                entity->Teleport(flags,position,angles,velocity);
+                Check(fixture.last_teleport.size == 44 && fixture.last_teleport.flags == flags &&
+                    fixture.last_teleport.position[2] == (flags & 1 ? 3 : 0) &&
+                    fixture.last_teleport.angles[1] == (flags & 2 ? 5 : 0) &&
+                    fixture.last_teleport.velocity[0] == (flags & 4 ? 7 : 0),"selected vectors copied, omitted vectors zero");
+            }
+            const auto before = fixture.tool_calls;
+            for (unsigned flags : {0u,8u,UINT32_MAX}) Reject([&] { entity->Teleport(flags,position,angles,velocity); },"bad teleport flags");
+            position[0] = std::numeric_limits<float>::quiet_NaN();
+            Reject([&] { entity->Teleport(1,position,angles,velocity); },"selected NaN refused");
+            Check(fixture.tool_calls == before,"invalid vectors never invoke engine");
+            entity->Teleport(4,position,angles,velocity); position[0] = 1;
+            std::string model(511,'a'); entity->SetModel(model); Check(fixture.last_model == model,"maximum model asset length");
+            for (const auto& invalid : {std::string{},std::string(512,'b'),std::string("bad\nasset"),std::string("a\0b",3),std::string("a\x7f")})
+                Reject([&] { entity->SetModel(invalid); },"invalid asset rejected");
+            fixture.on_tool = [&] { position.fill(99); angles.fill(99); velocity.fill(99); model = "changed"; };
+            entity->Teleport(7,position,angles,velocity);
+            Check(fixture.last_teleport.position[0] == 1 && fixture.last_teleport.angles[0] == 4 && fixture.last_teleport.velocity[0] == 7,"teleport snapshot survives callback edits");
+            model = "models/test.vmdl"; entity->SetModel(model);
+            Check(fixture.last_model == "models/test.vmdl" && model == "changed","asset snapshot survives callback edits");
+            fixture.on_tool = {};
+            fixture.wrong_identity = true; Reject([&] { entity->Remove(); },"changed identity refused"); fixture.wrong_identity = false;
+            fixture.tool_caps = 0; Reject([&] { entity->Remove(); },"unsupported tool refused"); fixture.tool_caps = 7;
+            fixture.tool_caps_status = KEEL_RESULT_UNSUPPORTED; Reject([&] { tools->ToolCapabilities(); },"capability failure propagated"); fixture.tool_caps_status = KEEL_RESULT_OK;
+            std::exception_ptr worker_error;
+            std::thread worker([&] { try {
+                Reject([&] { entity->Teleport(7,position,angles,velocity); },"worker teleport refused");
+                Reject([&] { entity->SetModel("test"); },"worker model refused");
+                Reject([&] { entity->Remove(); },"worker remove refused");
+            } catch (...) { worker_error = std::current_exception(); } });
+            worker.join(); if (worker_error) std::rethrow_exception(worker_error);
+            const auto recursion_start = fixture.tool_calls;
+            fixture.on_tool = [&] { entity->SetModel("reentry"); };
+            Reject([&] { entity->SetModel("initial"); },"recursive entity game call bounded"); fixture.on_tool = {};
+            Check(fixture.tool_calls == recursion_start+8,"eight game calls permitted before recursion rejection");
+            entity->Remove(); Check(!entity->Valid(),"immediate removal may invalidate entity before return"); entity->Close();
+            Reject([&] { entity->Remove(); },"closed entity refused");
+            entity = tools->Find(4); ++fixture.epoch;
+            Reject([&] { entity->SetModel("test"); },"expired map identity refused");
+        }
+        for (unsigned kind : {1u,2u,4u}) {
+            auto tools = fixture.ServiceFor(); auto entity = tools->Find(4);
+            std::weak_ptr<Service> weak = tools;
+            fixture.on_tool = [&] { entity.reset(); tools.reset(); };
+            fixture.tool_status = KEEL_RESULT_ENGINE_FAILURE;
+            Reject([&] {
+                if (kind == 1) entity->Teleport(7,{1,2,3},{4,5,6},{7,8,9});
+                else if (kind == 2) entity->SetModel("models/test.vmdl");
+                else entity->Remove();
+            },"engine failure after callback destroys entity and service owner");
+            Check(!entity && !tools && weak.expired(),"operation holds service only until completion");
+            fixture.on_tool = {}; fixture.tool_status = KEEL_RESULT_OK;
+        }
+        {
+            auto tools = fixture.ServiceFor(); auto entity = tools->Find(4);
+            std::weak_ptr<Service> weak = tools; const auto before = fixture.tool_calls;
+            fixture.on_tool_caps = [&] { entity.reset(); tools.reset(); };
+            Reject([&] { entity->Remove(); },"entity closed during capability lookup is not invoked");
+            fixture.on_tool_caps = {};
+            Check(weak.expired() && fixture.tool_calls == before,"capability reentry cleanup retains no stale owner");
+        }
+        {
+            auto legacy = std::make_shared<Service>(1,Fixture::entity_api,Fixture::schema_api,Fixture::player_api,Fixture::runtime_api);
+            auto entity = legacy->Find(4);
+            Reject([&] { legacy->ToolCapabilities(); },"legacy host has no tools");
+            Reject([&] { entity->Remove(); },"legacy host cannot remove entities");
+            auto bad = Fixture::tools_api; bad.remove = nullptr;
+            Reject([&] { static_cast<void>(std::make_shared<Service>(1,Fixture::entity_api,Fixture::schema_api,Fixture::player_api,Fixture::runtime_api,nullptr,&bad)); },"incomplete optional table refused");
+        }
+        Check(fixture.entities.empty() && fixture.fields.empty() && service->EntityCount() == 0,"entity game operations release all resources");
         std::cout << "Entity/schema identity, types, metadata, quotas and cleanup checks passed\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

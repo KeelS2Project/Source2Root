@@ -4,6 +4,10 @@ SchemaField Health;
 Player SavedPlayer;
 Entity ClosingEntity;
 SchemaField ClosingField;
+Entity ToolEntity;
+float ToolPosition[3];
+char ToolModel[64];
+int ToolFailures;
 public bool OnPluginStart()
 {
     Health = Schema_Find("CBaseEntity", "m_iHealth", Schema_Int32);
@@ -54,7 +58,17 @@ public bool OnPluginStart()
         && RegisterCommand("sr_sdk_player", "", Reconnected)
         && RegisterCommand("sr_sdk_write", "", WriteFields) && RegisterCommand("sr_sdk_write_unavailable", "", WriteUnavailable)
         && RegisterCommand("sr_sdk_write_error", "", WriteError) && RegisterCommand("sr_sdk_write_callback", "", WriteCallback)
-        && RegisterCommand("sr_sdk_close_active", "", CloseActive);
+        && RegisterCommand("sr_sdk_close_active", "", CloseActive)
+        && RegisterCommand("sr_sdk_tools", "", Tools)
+        && RegisterCommand("sr_sdk_tool_unavailable", "", ToolUnavailable)
+        && RegisterCommand("sr_sdk_tool_cap_error", "", ToolCapError)
+        && RegisterCommand("sr_sdk_tool_error", "", ToolError)
+        && RegisterCommand("sr_sdk_tool_callback", "", ToolCallback)
+        && RegisterCommand("sr_sdk_tool_callback_error", "", ToolCallbackError)
+        && RegisterCommand("sr_sdk_tool_cap_close", "", ToolCapClose)
+        && RegisterCommand("sr_sdk_tool_close", "", ToolClose)
+        && RegisterCommand("sr_sdk_tool_recursion", "", ToolRecursion)
+        && RegisterCommand("sr_sdk_tool_reenter", "", ToolReenter);
 }
 public void CheckRead(Player caller, const char[] arguments)
 {
@@ -63,7 +77,7 @@ public void CheckRead(Player caller, const char[] arguments)
 }
 public void Wrong(Player caller, const char[] arguments)
 {
-    Entity_IsValid(view_as<Entity>(Health));
+    Entity_Remove(view_as<Entity>(Health));
     LogMessage("SDKTOOLS_FAILED");
 }
 public void Stale(Player caller, const char[] arguments)
@@ -75,7 +89,7 @@ public void Epoch(Player caller, const char[] arguments)
 {
     int value = 99;
     if (Entity_IsValid(Retained) || Entity_Index(Retained) != -1 || Entity_ReadInt(Retained, Health, value) || value != 0
-        || Entity_WriteInt(Retained, Health, 90) || !Entity_Close(Retained)) { LogMessage("SDKTOOLS_FAILED"); return; }
+        || Entity_WriteInt(Retained, Health, 90) || Entity_Remove(Retained) || !Entity_Close(Retained)) { LogMessage("SDKTOOLS_FAILED"); return; }
     Retained = Entity_Find(4);
     LogMessage(Retained != NoEntity && Entity_IsValid(Retained) ? "SDKTOOLS_EPOCH_OK" : "SDKTOOLS_FAILED");
 }
@@ -138,4 +152,75 @@ public void CloseActive(Player caller, const char[] arguments)
 {
     Entity_Close(ClosingEntity); Schema_Close(ClosingField);
     ClosingEntity = NoEntity; ClosingField = NoSchemaField;
+}
+
+public void Tools(Player caller, const char[] arguments)
+{
+    int capabilities;
+    float p[3] = {1.0,2.0,3.0}, a[3] = {4.0,5.0,6.0}, v[3] = {7.0,8.0,9.0};
+    if (!Entity_GetToolCapabilities(capabilities) || capabilities != 7 ||
+        !Entity_Teleport(Retained,p,a,v) || Entity_Teleport(Retained,p,a,v,0) || Entity_Teleport(Retained,p,a,v,8))
+    { LogMessage("SDKTOOLS_FAILED teleport"); return; }
+    p[0] = view_as<float>(0x7fc00000);
+    if (Entity_Teleport(Retained,p,a,v,ENTITY_TELEPORT_POSITION) || !Entity_Teleport(Retained,p,a,v,ENTITY_TELEPORT_VELOCITY) ||
+        Entity_SetModel(Retained,"") || Entity_SetModel(Retained,"bad\nmodel") || !Entity_SetModel(Retained,"models/test.vmdl"))
+    { LogMessage("SDKTOOLS_FAILED model/vectors"); return; }
+    Entity other = Entity_Find(5);
+    if (other == NoEntity || !Entity_Remove(other) || Entity_IsValid(other) || Entity_Remove(other) ||
+        Entity_Find(5) != NoEntity || !Entity_Close(other))
+    { LogMessage("SDKTOOLS_FAILED remove"); return; }
+    LogMessage("SDKTOOLS_TOOLS_OK");
+}
+public void ToolUnavailable(Player caller, const char[] arguments)
+{
+    int caps = 99; float zero[3];
+    LogMessage(Entity_GetToolCapabilities(caps) && caps == 0 && !Entity_Teleport(Retained,zero,zero,zero) &&
+        !Entity_SetModel(Retained,"model") && !Entity_Remove(Retained) ? "SDKTOOLS_TOOL_UNAVAILABLE_OK" : "SDKTOOLS_FAILED unavailable tools");
+}
+public void ToolCapError(Player caller, const char[] arguments)
+{
+    int caps = 99;
+    LogMessage(!Entity_GetToolCapabilities(caps) && caps == 0 && !Entity_Remove(Retained)
+        ? "SDKTOOLS_TOOL_CAP_ERROR_OK" : "SDKTOOLS_FAILED tool cap error");
+}
+public void ToolError(Player caller, const char[] arguments)
+{
+    LogMessage(!Entity_SetModel(Retained,"models/error.vmdl") ? "SDKTOOLS_TOOL_ERROR_OK" : "SDKTOOLS_FAILED tool error");
+}
+void CallbackTool(int kind, bool expectFailure)
+{
+    ToolEntity = Entity_Find(kind == 4 ? 5 : 4);
+    ToolPosition[0] = 11.0; ToolPosition[1] = 12.0; ToolPosition[2] = 13.0;
+    Format(ToolModel,sizeof(ToolModel),"models/held.vmdl");
+    float zero[3];
+    bool result;
+    if (kind == 1) result = Entity_Teleport(ToolEntity,ToolPosition,zero,zero,ENTITY_TELEPORT_POSITION);
+    else if (kind == 2) result = Entity_SetModel(ToolEntity,ToolModel);
+    else result = Entity_Remove(ToolEntity);
+    LogMessage(result != expectFailure && ToolEntity == NoEntity && ToolPosition[0] == 99.0 && ToolModel[0] == 'c'
+        ? "SDKTOOLS_TOOL_CALLBACK_OK" : "SDKTOOLS_FAILED tool callback");
+}
+public void ToolCallback(Player caller, const char[] arguments)
+{
+    int kind;
+    if (!ParseInt(arguments,kind,1,4) || kind == 3) { LogMessage("SDKTOOLS_FAILED callback kind"); return; }
+    CallbackTool(kind,false);
+}
+public void ToolCallbackError(Player caller, const char[] arguments) { CallbackTool(2,true); }
+public void ToolCapClose(Player caller, const char[] arguments) { CallbackTool(2,true); }
+public void ToolClose(Player caller, const char[] arguments)
+{
+    if (!Entity_Close(ToolEntity)) { LogMessage("SDKTOOLS_FAILED closing tool entity"); return; }
+    ToolEntity = NoEntity; ToolPosition[0] = 99.0;
+    Format(ToolModel,sizeof(ToolModel),"changed");
+}
+public void ToolRecursion(Player caller, const char[] arguments)
+{
+    ToolEntity = Entity_Find(4); ToolFailures = 0;
+    bool result = Entity_SetModel(ToolEntity,"models/outer.vmdl"); Entity_Close(ToolEntity); ToolEntity = NoEntity;
+    LogMessage(result && ToolFailures == 1 ? "SDKTOOLS_TOOL_RECURSION_OK" : "SDKTOOLS_FAILED tool recursion");
+}
+public void ToolReenter(Player caller, const char[] arguments)
+{
+    if (!Entity_SetModel(ToolEntity,"models/nested.vmdl")) ++ToolFailures;
 }

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <set>
 #include <sstream>
 #include <thread>
 
@@ -102,6 +103,29 @@ public:
     unsigned entity_write_caps = 1, entity_write_count = 0;
     KeelResult entity_write_status = KEEL_RESULT_OK;
     bool entity_write_callback = false;
+    unsigned tool_caps = 7, tool_calls = 0, tool_mode = 0;
+    KeelResult tool_cap_status = KEEL_RESULT_OK, tool_status = KEEL_RESULT_OK;
+    KeelEntityTeleport tool_teleport{};
+    std::string tool_model;
+    std::set<std::uint32_t> removed_entities;
+    KeelResult ApplyTool(const GameEntityIdentity& entity, unsigned kind, const KeelEntityTeleport* request, const char* model) {
+        std::string error;
+        const auto valid = ValidateEntity(entity,error); if (valid != KEEL_RESULT_OK) return valid;
+        if (!(tool_caps & kind)) return KEEL_RESULT_UNSUPPORTED;
+        ++tool_calls;
+        if (tool_mode == 1) {
+            tool_mode = 0;
+            if (!Dispatch("sr_sdk_tool_close",-1) || !Dispatch("keel plugins unload 2",-1)) return KEEL_RESULT_ENGINE_FAILURE;
+        } else if (tool_mode == 2) {
+            if (!Dispatch("sr_sdk_tool_reenter",-1)) return KEEL_RESULT_ENGINE_FAILURE;
+        }
+        // Read after callbacks to detect borrowed script buffers or freed owners.
+        if (kind == KEELS2_ENTITY_TOOL_TELEPORT && request) tool_teleport = *request;
+        else if (kind == KEELS2_ENTITY_TOOL_SET_MODEL && model) tool_model = model;
+        else if (kind == KEELS2_ENTITY_TOOL_REMOVE) removed_entities.insert(entity.source2_handle);
+        else return KEEL_RESULT_INVALID_ARGUMENT;
+        return tool_status;
+    }
     std::map<std::string,std::vector<std::byte>> written_fields;
     KeelResult ReadPlayer(int slot, KeelPlayerInfo& player) {
         if (lookup != KEEL_RESULT_OK) return lookup;
@@ -267,7 +291,7 @@ public:
         return FindEntityBySource2Handle(index == 3 ? 0x12003 : index == 4 ? 0x23004 : index == 5 ? 0x45005 : 0, entity, error);
     }
     KeelResult FindEntityBySource2Handle(uint32_t handle, GameEntityIdentity& entity, std::string&) override {
-        if (handle != 0x23004 && handle != 0x12003 && handle != 0x45005) return KEEL_RESULT_NOT_FOUND;
+        if (removed_entities.contains(handle) || (handle != 0x23004 && handle != 0x12003 && handle != 0x45005)) return KEEL_RESULT_NOT_FOUND;
         entity = {handle == 0x12003 ? 3 : handle == 0x23004 ? 4 : 5, handle, entity_epoch};
         if (mutate_pawn == 1) pawn_handle = 0x24004;
         if (mutate_pawn == 2) ++user_id;
@@ -277,7 +301,7 @@ public:
     }
     KeelResult ValidateEntity(const GameEntityIdentity& entity, std::string&) override {
         if ((entity.source2_handle != 0x23004 && entity.source2_handle != 0x12003 && entity.source2_handle != 0x45005) ||
-            entity.epoch != entity_epoch) return KEEL_RESULT_NOT_FOUND;
+            entity.epoch != entity_epoch || removed_entities.contains(entity.source2_handle)) return KEEL_RESULT_NOT_FOUND;
         return entity_status;
     }
     KeelResult ReadEntityField(const GameEntityIdentity& entity, const GameSchemaField& field, void* value, uint32_t size, std::string& error) override {
@@ -779,4 +803,34 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT int SrFixtureDamageInvoke() {
     SrFixtureDamageTarget(&active->entity_objects[1],&damage,&result);
     if (result != 0x1122334455667788ull || damage.damage_custom != -7 || damage.inflictor != 0x45005) return -101;
     return sdkhook_damage_calls == before ? -1 : static_cast<int>(sdkhook_damage_value);
+}
+
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityTools(unsigned version, GameAdapterEntityToolsApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {}; if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),1,
+        [](GameAdapter* adapter,unsigned* flags) noexcept -> KeelResult {
+            if (flags) *flags = 0;
+            if (!adapter || !flags) return KEEL_RESULT_INVALID_ARGUMENT;
+            try {
+                auto& state = *static_cast<Adapter*>(adapter);
+                if (state.tool_mode == 3) { state.tool_mode = 0; if (!state.Dispatch("sr_sdk_tool_close",-1)) return KEEL_RESULT_ENGINE_FAILURE; }
+                *flags = state.tool_caps; return state.tool_cap_status;
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](GameAdapter* adapter,const GameEntityIdentity* entity,unsigned kind,const KeelEntityTeleport* request,const char* model) noexcept -> KeelResult {
+            if (!adapter || !entity) return KEEL_RESULT_INVALID_ARGUMENT;
+            try { return static_cast<Adapter*>(adapter)->ApplyTool(*entity,kind,request,model); }
+            catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureToolState(unsigned caps,unsigned cap_status,unsigned status,unsigned mode) {
+    if (active) { active->tool_caps = caps; active->tool_cap_status = cap_status; active->tool_status = status; active->tool_mode = mode; }
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureToolCount() { return active ? active->tool_calls : 0; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureRestoreEntities() { if (active) active->removed_entities.clear(); }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureToolData(KeelEntityTeleport* teleport,char* model,unsigned capacity) {
+    if (!active || !teleport || !model || capacity <= active->tool_model.size()) return false;
+    *teleport = active->tool_teleport; std::memcpy(model,active->tool_model.c_str(),active->tool_model.size()+1); return true;
 }

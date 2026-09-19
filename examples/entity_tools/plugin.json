@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "entity_tools_example",
+  "name": "Entity game operations",
+  "author": "KeelS2 Project",
+  "version": "1.0.0",
+  "api": 2,
+  "entry": "entity_tools.smx",
+  "source": "entity_tools.sp",
+  "enabled": false,
+  "dependencies": []
+}
