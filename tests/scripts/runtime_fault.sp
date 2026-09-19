@@ -33,6 +33,7 @@ public void BadArray()
 public void Runaway()
 {
     int value;
+
     while (true)
         value++;
 }
@@ -47,7 +48,9 @@ public void Divide(int zero)
 public int DelayedNative()
 {
     int value = TestNativeDelay();
+
     for (int i = 0; i < 8; i++)
         value++;
+
     return value;
 }

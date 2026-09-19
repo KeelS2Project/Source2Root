@@ -10,6 +10,7 @@ public:
     Rounds& operator=(const Rounds&) = delete;
     unsigned Capabilities() const;
     void Terminate(float delay, int reason, int team);
+
 private:
     void Thread() const;
     KeelPluginHandle plugin_;

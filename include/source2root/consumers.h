@@ -19,6 +19,7 @@ typedef struct SrConsumerApi {
        Player handle; handles remain subject to normal script resource limits. */
     KeelResult (*player_handle)(void*, KeelPluginHandle provider, uint64_t consumer,
         const KeelPlayerConnection* player, int32_t* handle);
+
     /* Rechecks the connection and current core permission rules. Empty
        permission permits any current player. Output is false on failure. */
     KeelResult (*check_permission)(void*, KeelPluginHandle provider, uint64_t consumer,

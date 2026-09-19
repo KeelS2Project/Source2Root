@@ -4,6 +4,7 @@ public bool OnPluginStart()
 {
     if (!RegisterCommand("sr_partial", "", Partial))
         return false;
+
     return RegisterCommand("sr_partial", "", Partial);
 }
 

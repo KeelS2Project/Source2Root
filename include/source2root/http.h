@@ -8,8 +8,18 @@ extern "C" {
 #endif
 #define SR_HTTP_SERVICE "source2root.http"
 #define SR_HTTP_API_VERSION 1u
-typedef enum SrHttpMethod { SR_HTTP_GET, SR_HTTP_HEAD, SR_HTTP_POST, SR_HTTP_PUT, SR_HTTP_PATCH, SR_HTTP_DELETE } SrHttpMethod;
-typedef struct SrHttpHeader { const char* name; const char* value; } SrHttpHeader;
+typedef enum SrHttpMethod {
+    SR_HTTP_GET,
+    SR_HTTP_HEAD,
+    SR_HTTP_POST,
+    SR_HTTP_PUT,
+    SR_HTTP_PATCH,
+    SR_HTTP_DELETE
+} SrHttpMethod;
+typedef struct SrHttpHeader {
+    const char* name;
+    const char* value;
+} SrHttpHeader;
 typedef struct SrHttpPart {
     const char* name;
     const uint8_t* data;
@@ -44,7 +54,9 @@ typedef struct SrHttpResponse {
     const uint8_t* body;
     uint32_t body_size;
 } SrHttpResponse;
+
 typedef KeelBool (*SrHttpCanceled)(void* user_data);
+
 typedef void (*SrHttpComplete)(void* user_data, const SrHttpResponse* response);
 typedef struct SrHttpApi {
     uint32_t size;

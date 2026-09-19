@@ -26,36 +26,83 @@ class GameHost {
 public:
     virtual ~GameHost() = default;
     virtual KeelResult Lookup(int slot, Player& player) = 0;
-    virtual KeelResult NextPlayer(int, Player&) { return KEEL_RESULT_UNSUPPORTED; }
+    virtual KeelResult NextPlayer(int, Player&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
     virtual KeelResult Reply(const Player* player, const std::string& text) = 0;
     virtual void Log(const std::string& text) = 0;
-    virtual KeelResult PlayerHealth(const Player&, std::int32_t&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult SlapPlayer(const Player&, int) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult SlayPlayer(const Player&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult MapInstalled(const std::string&, bool&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult ChangeMap(const std::string&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult RestartRound(int) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult KickPlayer(const Player&, const std::string&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult GetListening(const Player&, const Player&, bool&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult SetListening(const Player&, const Player&, bool) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual Timestamp UtcNow() const { return std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()); }
+    virtual KeelResult PlayerHealth(const Player&, std::int32_t&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult SlapPlayer(const Player&, int) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult SlayPlayer(const Player&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult MapInstalled(const std::string&, bool&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult ChangeMap(const std::string&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult RestartRound(int) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult KickPlayer(const Player&, const std::string&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult GetListening(const Player&, const Player&, bool&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult SetListening(const Player&, const Player&, bool) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual Timestamp UtcNow() const {
+        return std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+    }
+
     virtual KeelResult RegisterCommand(const std::string& name) = 0;
     virtual KeelResult RemoveCommand(const std::string& name) = 0;
     virtual KeelResult ListenEvent(const std::string& name) = 0;
     virtual KeelResult RemoveEvent(const std::string& name) = 0;
     virtual KeelResult RenderMenu(const Player& player, const std::string& html, int duration_ms = 0) = 0;
     virtual KeelResult ReadPlayerInput(const Player&, KeelPlayerInput& input) {
-        input = {sizeof(input), 0, 0, 0}; return KEEL_RESULT_UNSUPPORTED;
+        input = {sizeof(input), 0, 0, 0};
+        return KEEL_RESULT_UNSUPPORTED;
     }
+
     virtual KeelResult AcquireProvider(const std::string& service, unsigned version) = 0;
     virtual KeelResult ReleaseProvider(const std::string& service, unsigned version) = 0;
-    virtual KeelResult CreateConVar(const ConVarDefinition&, std::uint64_t&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult ReadConVar(std::uint64_t, ConVarValue&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult WriteConVar(std::uint64_t, const ConVarValue&) { return KEEL_RESULT_UNSUPPORTED; }
-    virtual KeelResult ReleaseConVar(std::uint64_t) { return KEEL_RESULT_UNSUPPORTED; }
+    virtual KeelResult CreateConVar(const ConVarDefinition&, std::uint64_t&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult ReadConVar(std::uint64_t, ConVarValue&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult WriteConVar(std::uint64_t, const ConVarValue&) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    virtual KeelResult ReleaseConVar(std::uint64_t) {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
 };
 
 enum class PluginState { Loading, Running, Retiring, Disabled, Failed, Paused };
+
 enum class Origin { ServerConsole, ClientConsole, PublicChat, SilentChat };
 
 struct Manifest {
@@ -76,8 +123,11 @@ struct PluginStatus {
 class Foundation {
 public:
     using Clock = std::chrono::steady_clock;
-    Foundation(GameHost& host, const std::filesystem::path& runtime_library,
-               std::filesystem::path root, CoreSettings settings = {});
+    Foundation(GameHost& host,
+               const std::filesystem::path& runtime_library,
+               std::filesystem::path root,
+               CoreSettings settings = {});
+
     ~Foundation();
     bool Load(const std::filesystem::path& manifest);
     bool Unload(const std::string& id);
@@ -94,7 +144,10 @@ public:
     void ReloadPermissions();
     bool SetSetting(const std::string& name, const std::string& value);
     bool SetSettings(const std::array<std::string, 4>& values);
-    const CoreSettings& Settings() const { return settings_; }
+    const CoreSettings& Settings() const {
+        return settings_;
+    }
+
     std::vector<PluginStatus> Status() const;
     std::size_t ExtensionCount() const;
     std::vector<KeelPluginHandle> Extensions() const;
@@ -112,21 +165,29 @@ public:
     KeelResult UnregisterNative(KeelPluginHandle owner, SrRegistration registration);
     KeelResult DeliverCallback(KeelPluginHandle owner, SrCallback callback,
         const Cell* cells, std::uint32_t count, const char* text);
+
     KeelResult CancelCallback(KeelPluginHandle owner, SrCallback callback);
     KeelResult RetainCallback(KeelPluginHandle owner, SrCallback callback);
     KeelResult InvokeCallback(KeelPluginHandle owner, SrCallback callback,
         const SrCallbackArgument* arguments, std::uint32_t count, Cell* result);
+
     KeelResult NativePlayerSnapshot(SrPlayerIdentity* players, std::uint32_t capacity, std::uint32_t* count);
     KeelResult NativeConsumerStatus(KeelPluginHandle provider, std::uint64_t owner);
     KeelResult ConsumerPlayer(KeelPluginHandle provider, std::uint64_t owner,
         const KeelPlayerConnection* connection, Cell* handle);
+
     KeelResult ConsumerPermission(KeelPluginHandle provider, std::uint64_t owner,
         const KeelPlayerConnection* connection, const char* permission, KeelBool* allowed);
+
     KeelResult OpenNativeMenu(KeelPluginHandle owner, const KeelPlayerConnection& player,
         const SrMenuSpec& spec, SrMenuSession& session);
+
     KeelResult CloseNativeMenu(KeelPluginHandle owner, SrMenuSession session);
     KeelResult NativeMenuStatus(KeelPluginHandle owner, SrMenuSession session);
-    const std::string& Error() const { return error_; }
+    const std::string& Error() const {
+        return error_;
+    }
+
 private:
     struct Command {
         std::string permission;
@@ -134,6 +195,7 @@ private:
         std::string usage;
         SourcePawn::IPluginFunction* menu = nullptr;
     };
+
     struct Script {
         Manifest manifest;
         std::filesystem::path manifest_path;
@@ -155,32 +217,63 @@ private:
         std::set<SrCallback> callbacks;
         std::unique_ptr<SourcePawn::IPluginRuntime> vm;
     };
+
     struct Slot {
         std::unique_ptr<Script> current, replacement;
         PluginState replacement_state = PluginState::Running;
     };
-    struct Timer { Clock::time_point due; SourcePawn::IPluginFunction* callback; Cell target; bool across_maps = false; };
-    struct ScriptMenu { Menu menu; SourcePawn::IPluginFunction* callback; SourcePawn::IPluginFunction* back = nullptr; };
-    struct ScriptConVar { std::string name; };
-    struct ConfigFile { std::string text; std::size_t cursor = 0; };
+
+    struct Timer {
+        Clock::time_point due;
+        SourcePawn::IPluginFunction* callback;
+        Cell target;
+        bool across_maps = false;
+    };
+
+    struct ScriptMenu {
+        Menu menu;
+        SourcePawn::IPluginFunction* callback;
+        SourcePawn::IPluginFunction* back = nullptr;
+    };
+
+    struct ScriptConVar {
+        std::string name;
+    };
+
+    struct ConfigFile {
+        std::string text;
+        std::size_t cursor = 0;
+    };
+
     struct ExtensionValue {
         void* data = nullptr;
         SrResourceDestroy destroy = nullptr;
         bool owned = false;
-        ~ExtensionValue() noexcept { if (owned) { try { destroy(data); } catch (...) {} } }
+        ~ExtensionValue() noexcept {
+            if (owned) {
+                try {
+                    destroy(data);
+                } catch (...) {
+                }
+            }
+        }
     };
+
     struct ExtensionResource {
         KeelPluginHandle provider;
         std::uint32_t type;
         std::shared_ptr<ExtensionValue> value;
     };
     using Resource = std::variant<Player, Timer, ScriptMenu, ScriptConVar, ConfigFile, ExtensionResource>;
-    static constexpr unsigned PlayerType = 1, TimerType = 2, MenuType = 3, ConVarType = 4, ConfigFileType = 5, ExtensionType = 6;
+    static constexpr unsigned PlayerType = 1, TimerType = 2, MenuType = 3, ConVarType = 4, ConfigFileType = 5,
+                              ExtensionType = 6;
+
     struct Variable {
         ConVarDefinition definition;
         std::uint64_t native = 0;
         std::set<Script*> owners;
     };
+
     struct Display {
         std::uint64_t session;
         Script* script;
@@ -191,6 +284,7 @@ private:
         std::chrono::milliseconds timeout;
         MenuControls controls;
     };
+
     struct Provider {
         KeelPluginHandle owner;
         std::string name, service;
@@ -199,7 +293,9 @@ private:
         void* user_data;
         SrContextNativeFunction context_invoke = nullptr;
     };
+
     struct NativeInvocation;
+
     struct ExtensionCallback {
         Script* script;
         KeelPluginHandle provider;
@@ -210,6 +306,7 @@ private:
     SrCallback next_callback_ = 1;
     unsigned callback_depth_ = 0;
     Cell InvokeContextNative(Script& script, Provider& provider, const Arguments& args);
+
     struct NativeDisplay {
         std::uint64_t session;
         KeelPluginHandle owner;
@@ -236,7 +333,11 @@ private:
     std::map<std::string, Variable> convars_;
     std::map<SrRegistration, Provider> providers_;
     Handles<Resource> handles_;
-    struct PendingMap { std::uint64_t owner; std::string plugin, name; };
+
+    struct PendingMap {
+        std::uint64_t owner;
+        std::string plugin, name;
+    };
     std::optional<PendingMap> pending_map_;
     std::map<int, Display> displays_;
     Permissions permissions_;
@@ -288,10 +389,15 @@ private:
     static void ValidateConVar(const ConVarDefinition& definition);
     static std::string ConVarText(const ConVarValue& value);
     bool Cleanup(Script& script);
-    bool Invoke(Script& script, SourcePawn::IPluginFunction* function,
-                const std::vector<Cell>& cells = {}, const char* text = nullptr, Cell* result = nullptr);
+    bool Invoke(Script& script,
+                SourcePawn::IPluginFunction* function,
+                const std::vector<Cell>& cells = {},
+                const char* text = nullptr,
+                Cell* result = nullptr);
+
     bool RegisterCommand(Script& script, const std::string& name, const std::string& permission,
                          SourcePawn::IPluginFunction* callback, const std::string& usage);
+
     bool ListenEvent(Script& script, const std::string& name, SourcePawn::IPluginFunction* callback);
     Cell PlayerHandle(Script& script, const Player& player);
     KeelResult ResolvePlayer(Script& script, Cell handle, Player& player);

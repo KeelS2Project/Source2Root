@@ -15,12 +15,14 @@ struct MenuItem {
 };
 
 enum class MenuInput { Up, Down, Select, Back };
+
 enum class MenuAction { None, Changed, Selected, Cancelled };
 
 class MenuControls {
 public:
     void Baseline(const KeelPlayerInput& input);
     std::optional<MenuInput> Read(const KeelPlayerInput& input);
+
 private:
     std::uint64_t buttons_ = 0, context_ = 0;
 };

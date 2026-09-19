@@ -25,12 +25,17 @@ struct Ban {
 class BanStore {
 public:
     explicit BanStore(std::filesystem::path path) : ban_file_(std::move(path)) {}
+
     bool Load(std::string& error);
     const Ban* ActiveBan(std::uint64_t account, Timestamp now) const;
     bool AddBan(std::uint64_t account, std::uint64_t minutes, std::string reason, std::string actor,
                 Timestamp now, std::string& error);
+
     bool RemoveBan(std::uint64_t account, bool& removed, std::string& error);
-    const std::map<std::uint64_t, Ban>& Entries() const { return bans_; }
+    const std::map<std::uint64_t, Ban>& Entries() const {
+        return bans_;
+    }
+
 private:
     static bool Read(const std::filesystem::path& path, std::string& contents, std::string& error);
     static bool AtomicWrite(const std::filesystem::path& path, const std::string& contents, std::string& error);

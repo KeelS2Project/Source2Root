@@ -16,10 +16,14 @@ private:
         generator_.seed(std::random_device{}());
         return RegisterNative("RandomInt", &RandomExtension::RandomInt);
     }
+
     std::int32_t RandomInt(std::int32_t minimum, std::int32_t maximum) {
-        if (minimum > maximum) throw std::invalid_argument("Minimum must not exceed maximum.");
+        if (minimum > maximum)
+            throw std::invalid_argument("Minimum must not exceed maximum.");
+
         return std::uniform_int_distribution<std::int32_t>(minimum, maximum)(generator_);
     }
+
     std::mt19937 generator_;
 };
 }

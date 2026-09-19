@@ -12,6 +12,7 @@ public void Wave(Player caller, const char[] arguments)
         ReplyToCommand(caller, "Usage: sr_wave");
         return;
     }
+
     if (!ShowActivity(caller, "waved."))
     {
         char error[256];

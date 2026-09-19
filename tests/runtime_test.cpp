@@ -55,6 +55,7 @@ int main(int argc, char** argv) {
     sr::Cell value = 0;
     Require(runtime.Invoke("hello", hello->GetFunctionByName("OnPluginStart"), {}, nullptr, value) && value == 1,
             "real initialization");
+
     Require(command && event, "registered callbacks");
     Require(runtime.Invoke("hello", command, {0}, "sample argument", value), "real command execution");
     Require(replies == 1 && timer, "command called natives and created timer");
@@ -64,13 +65,20 @@ int main(int argc, char** argv) {
     auto faults = runtime.Load(argv[3]);
     Require(runtime.Invoke("faults", faults->GetFunctionByName("ReferenceValues"), {}, nullptr, value) && value == 42,
             "debug metadata and write-back for integer, Boolean and enum reference arguments");
+
     runtime.Bind(*faults, "TestArraySum", 2, [](const sr::Arguments& args) {
         const auto values = args.Array(1, args.Int(2));
         return std::accumulate(values.begin(), values.end(), sr::Cell{0});
     });
-    Require(runtime.Invoke("faults", faults->GetFunctionByName("ArraySum"), {}, nullptr, value) && value == 24, "read valid VM array in test-only native");
-    Require(!runtime.Invoke("faults", faults->GetFunctionByName("BadArray"), {}, nullptr, value), "reject bad array bounds");
-    Require(!runtime.Invoke("faults", faults->GetFunctionByName("Divide"), {0}, nullptr, value), "contain arithmetic fault");
+    Require(runtime.Invoke("faults", faults->GetFunctionByName("ArraySum"), {}, nullptr, value) && value == 24,
+            "read valid VM array in test-only native");
+
+    Require(!runtime.Invoke("faults", faults->GetFunctionByName("BadArray"), {}, nullptr, value),
+            "reject bad array bounds");
+
+    Require(!runtime.Invoke("faults", faults->GetFunctionByName("Divide"), {0}, nullptr, value),
+            "contain arithmetic fault");
+
     runtime.Bind(*faults, "TestNativeDelay", 0, [](const sr::Arguments&) {
         // Model a durable native write: the upstream wall-clock watchdog
         // includes native time even though it cannot interrupt native code.
@@ -79,15 +87,21 @@ int main(int argc, char** argv) {
     });
     Require(runtime.Invoke("faults", faults->GetFunctionByName("DelayedNative"), {}, nullptr, value) && value == 42,
             "bounded native latency leaves time to finish the script callback");
+
     const auto before = std::chrono::steady_clock::now();
-    Require(!runtime.Invoke("faults", faults->GetFunctionByName("Runaway"), {}, nullptr, value), "interrupt interpreter loop");
+    Require(!runtime.Invoke("faults", faults->GetFunctionByName("Runaway"), {}, nullptr, value),
+            "interrupt interpreter loop");
+
     Require(std::chrono::steady_clock::now() - before < std::chrono::seconds(3), "watchdog deadline");
     Require(runtime.Idle(), "runtime is idle after faults");
     Require(runtime.Invoke("faults", faults->GetFunctionByName("ArraySum"), {}, nullptr, value) && value == 24,
             "runtime executes callbacks after watchdog recovery");
+
     bool stack = false;
+
     for (const auto& message : messages)
         stack = stack || message.find("runtime_fault.sp:") != std::string::npos;
+
     Require(stack, "file and line diagnostics");
     std::cout << "actual SourcePawn command, array/string bridge, callbacks, faults and x64 watchdog passed\n";
 }

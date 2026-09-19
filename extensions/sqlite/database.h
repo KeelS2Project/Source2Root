@@ -10,6 +10,7 @@
 #include <string>
 
 struct sqlite3;
+
 struct sqlite3_stmt;
 
 namespace source2root::sqlite {
@@ -26,7 +27,10 @@ public:
     bool InTransaction() const;
     std::int64_t InsertId() const;
     int Changes() const;
-    void AllowTransactions(bool allow) { allow_transactions_ = allow; }
+    void AllowTransactions(bool allow) {
+        allow_transactions_ = allow;
+    }
+
 private:
     friend class Statement;
     sqlite3* database_ = nullptr;
@@ -54,6 +58,7 @@ public:
     std::int32_t Int(int column) const;
     double Float(int column) const;
     std::string String(int column) const;
+
 private:
     std::shared_ptr<Database> database_;
     sqlite3_stmt* statement_ = nullptr;

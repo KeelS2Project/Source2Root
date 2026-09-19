@@ -38,8 +38,10 @@ class InstallerTest(unittest.TestCase):
             (package / "files.sha256.json").write_text(json.dumps({relative: live.digest(module)}))
             originals = {p.relative_to(server): p.read_bytes() for p in server.rglob("*") if p.is_file()}
             args = SimpleNamespace(server=server, package=package, evidence=root / "evidence")
+
             with self.assertRaisesRegex(RuntimeError, "Legacy administrator data is present"):
                 live.install(args)
+
             self.assertFalse(args.evidence.exists())
             self.assertEqual(originals, {p.relative_to(server): p.read_bytes() for p in server.rglob("*") if p.is_file()})
             staged = {
@@ -48,26 +50,32 @@ class InstallerTest(unittest.TestCase):
                 "addons/source2root/configs/allowed_maps.txt": b"de_dust2\n",
                 "cfg/source2root/source2root.cfg": b"sr_show_activity 5\n",
             }
+
             for staged_relative, content in staged.items():
                 destination = game / staged_relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(content)
+
             originals = {p.relative_to(server): p.read_bytes() for p in server.rglob("*") if p.is_file()}
             live.install(args)
             self.assertFalse(old.exists())
             self.assertEqual(private.read_bytes(), b"private sentinel")
             installed = game / relative
             installed.write_bytes(b"someone else's edit")
+
             with self.assertRaisesRegex(RuntimeError, "changed after installation"):
                 live.restore(args)
+
             self.assertFalse(old.exists())
             self.assertEqual(installed.read_bytes(), b"someone else's edit")
             installed.write_bytes(b"candidate")
             live.restore(args)
             stopped.assert_called()
             self.assertFalse(installed.exists())
+
             for relative, content in originals.items():
                 self.assertEqual((server / relative).read_bytes(), content)
+
             live.restore(args)
 
 

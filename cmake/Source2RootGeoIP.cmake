@@ -1,4 +1,5 @@
 option(SR_GEOIP_EXTENSION "Build local GeoIP database reader extension" ON)
+
 if(SR_GEOIP_EXTENSION)
     enable_language(C)
     include(FetchContent)
@@ -24,6 +25,7 @@ if(SR_GEOIP_EXTENSION)
     target_compile_definitions(source2root_geoip PRIVATE KEELS2_PLUGIN_BUILD)
     target_include_directories(source2root_geoip PRIVATE include)
     target_link_libraries(source2root_geoip PRIVATE sr_geoip Threads::Threads KeelS2::SDK KeelS2::SourceSDK)
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(source2root_geoip PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
     endif()

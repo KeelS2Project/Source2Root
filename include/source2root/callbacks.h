@@ -61,6 +61,7 @@ typedef struct SrCallbackApi {
        The caller must not apply hook changes when invocation fails. */
     KeelResult (*invoke)(void*, KeelPluginHandle provider, SrCallback callback,
         const SrCallbackArgument* arguments, uint32_t count, int32_t* result);
+
     /* Cancellation is safe from inside the callback. Script cleanup also
        cancels tokens before destroying resources or releasing providers. */
     KeelResult (*cancel)(void*, KeelPluginHandle provider, SrCallback callback);

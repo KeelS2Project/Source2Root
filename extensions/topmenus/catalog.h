@@ -9,9 +9,14 @@
 
 namespace source2root::topmenus {
 
-class Error : public std::runtime_error { using std::runtime_error::runtime_error; };
+class Error : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 struct Menu;
+
 enum class Kind { Category, Item };
+
 enum class Access { Hidden, Enabled, Disabled };
 
 struct Object {
@@ -36,6 +41,7 @@ struct Row {
     bool back = false;
     bool empty = false;
 };
+
 struct Page {
     std::string title, category;
     std::vector<Row> rows;
@@ -49,6 +55,7 @@ struct Menu : std::enable_shared_from_this<Menu> {
     std::vector<std::weak_ptr<Object>> objects;
     std::shared_ptr<Object> Add(Kind kind, std::string key, std::string category, std::string label,
         std::string permission, std::string plugin, std::uint64_t owner, std::int32_t order);
+
     void SetTitle(std::string value);
     std::vector<std::shared_ptr<Object>> Active(const std::function<bool(std::uint64_t)>& running);
     Page Build(const std::string& category, std::size_t page,
@@ -59,6 +66,7 @@ struct Menu : std::enable_shared_from_this<Menu> {
 class Catalog {
 public:
     std::shared_ptr<Menu> Open(const std::string& name, const std::string& title);
+
 private:
     std::vector<std::weak_ptr<Menu>> menus_;
 };

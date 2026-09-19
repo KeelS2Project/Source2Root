@@ -13,8 +13,12 @@ class Cs2MenuBackend {
 public:
     Cs2MenuBackend(INetworkMessages* messages, IGameEventSystem* events)
         : messages_(messages), events_(events) {}
+
     KeelResult Render(IGameEventManager2* manager, int slot, const std::string& html, int duration_ms);
-    const std::string& Error() const { return error_; }
+    const std::string& Error() const {
+        return error_;
+    }
+
 private:
     INetworkMessages* messages_;
     IGameEventSystem* events_;

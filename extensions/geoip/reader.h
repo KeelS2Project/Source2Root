@@ -9,10 +9,16 @@
 #include <string>
 
 namespace source2root::geoip {
-class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
+class Error : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 enum class Field { CountryCode, CountryName, RegisteredCountryCode, RegisteredCountryName,
     ContinentCode, ContinentName, RegionCode, RegionName, City, PostalCode, TimeZone, Organization, Count };
+
 enum class Number { Latitude, Longitude, AccuracyRadius, Count };
+
 struct Record {
     std::array<std::optional<std::string>, static_cast<unsigned>(Field::Count)> text;
     std::array<std::optional<float>, static_cast<unsigned>(Number::Count)> numbers;
@@ -33,6 +39,7 @@ public:
     std::optional<Record> Lookup(const std::string& address, const std::string& language = "en") const;
     std::string Type() const;
     std::uint64_t Epoch() const;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

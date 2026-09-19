@@ -8,12 +8,15 @@
 namespace source2root::prefs {
 
 using Error = db::Error;
+
 enum class Access { Public, Protected, Private };
+
 struct Definition {
     std::string name, description;
     Access access = Access::Public;
     bool operator==(const Definition&) const = default;
 };
+
 struct Value {
     std::string text;
     std::int64_t updated = 0;
@@ -44,6 +47,7 @@ public:
     Definition Register(const Definition& cookie) override;
     Values Load(std::uint64_t account) override;
     void Save(std::uint64_t account, const Values& values) override;
+
 private:
     std::shared_ptr<sqlite::Database> database_;
 };

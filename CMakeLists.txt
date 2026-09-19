@@ -3,14 +3,17 @@ project(Source2Root VERSION 1.0.0 LANGUAGES CXX)
 
 execute_process(COMMAND git rev-parse --short=12 HEAD WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     OUTPUT_VARIABLE SR_BUILD_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE SR_GIT_RESULT ERROR_QUIET)
+
 if(NOT SR_GIT_RESULT EQUAL 0)
     set(SR_BUILD_REVISION "unknown")
 else()
     execute_process(COMMAND git diff --quiet HEAD -- WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" RESULT_VARIABLE SR_GIT_DIRTY)
+
     if(NOT SR_GIT_DIRTY EQUAL 0)
         string(APPEND SR_BUILD_REVISION "-dirty")
     endif()
 endif()
+
 configure_file(src/build_info.h.in generated/build_info.h @ONLY)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -18,26 +21,34 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-fno-gnu-unique)
 endif()
+
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "Source2Root requires x64")
 endif()
+
 if(MSVC)
     add_compile_options(/EHsc)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
+
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "scripting/include/source2root.inc")
 file(STRINGS "scripting/include/source2root.inc" SR_NATIVE_DECLARATIONS REGEX "^native ")
 set(SR_NATIVE_NAMES "")
+
 foreach(declaration IN LISTS SR_NATIVE_DECLARATIONS)
     string(REGEX MATCH "^native [A-Za-z_][A-Za-z_0-9]* ([A-Za-z_][A-Za-z_0-9]*)\\(" match "${declaration}")
+
     if(NOT match)
         message(FATAL_ERROR "Could not read core native declaration: ${declaration}")
     endif()
+
     string(APPEND SR_NATIVE_NAMES "    std::string_view{\"${CMAKE_MATCH_1}\"},\n")
 endforeach()
+
 file(WRITE "${CMAKE_BINARY_DIR}/generated/core_native_names.h"
     "#pragma once\n#include <array>\n#include <string_view>\nnamespace sr { inline constexpr std::array CoreNativeNames{\n${SR_NATIVE_NAMES}}; }\n")
 
@@ -61,19 +72,24 @@ target_include_directories(sr_pawn PUBLIC src include "${SOURCEPAWN_ROOT}/includ
 target_link_libraries(sr_pawn PUBLIC ${CMAKE_DL_LIBS} KeelS2::SDK)
 file(GLOB_RECURSE SR_ZLIB_ARCHIVES "${SOURCEPAWN_BUILD}/third_party/zlib/*.a" "${SOURCEPAWN_BUILD}/third_party/zlib/*.lib")
 list(LENGTH SR_ZLIB_ARCHIVES SR_ZLIB_COUNT)
+
 if(NOT SR_ZLIB_COUNT EQUAL 1)
     message(FATAL_ERROR "Build the pinned SourcePawn dependency for x64 before configuring")
 endif()
+
 target_include_directories(sr_pawn PRIVATE "${SOURCEPAWN_ROOT}/third_party")
 target_link_libraries(sr_pawn PRIVATE ${SR_ZLIB_ARCHIVES})
+
 if(SR_SANITIZERS AND NOT MSVC)
     target_compile_options(sr_pawn PUBLIC -fno-sanitize=vptr)
 endif()
+
 if(WIN32)
     set(SR_PROTOC "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/devtools/bin/protoc.exe")
 else()
     set(SR_PROTOC "${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/devtools/bin/linux/protoc")
 endif()
+
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/gameevents.pb.h" "${CMAKE_BINARY_DIR}/generated/gameevents.pb.cc"
     COMMAND "${SR_PROTOC}" "--proto_path=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/common"
         "--proto_path=${KEELS2_SOURCE_SDK_RESOLVED_ROOT}/game/shared"
@@ -95,9 +111,11 @@ add_library(source2root MODULE src/module.cpp)
 target_compile_definitions(source2root PRIVATE KEELS2_PLUGIN_BUILD)
 target_link_libraries(source2root PRIVATE sr_foundation sr_cs2_menu)
 target_include_directories(source2root PRIVATE "${CMAKE_BINARY_DIR}/generated")
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(source2root PRIVATE "LINKER:--exclude-libs,ALL")
 endif()
+
 add_library(source2root_random MODULE examples/native/extension.cpp)
 target_compile_definitions(source2root_random PRIVATE KEELS2_PLUGIN_BUILD)
 target_include_directories(source2root_random PRIVATE include)
@@ -112,6 +130,7 @@ include(cmake/Source2RootCounterStrike.cmake)
 include(cmake/Source2RootDHooks.cmake)
 include(cmake/Source2RootTopMenus.cmake)
 include(cmake/Source2RootPackaging.cmake)
+
 if(WIN32)
     set(SR_SP_ARCH "windows-x86_64")
     set(SR_SP_LIBRARY "${SOURCEPAWN_BUILD}/libsourcepawn/${SR_SP_ARCH}/libsourcepawn.dll")
@@ -121,6 +140,7 @@ else()
     set(SR_SP_LIBRARY "${SOURCEPAWN_BUILD}/libsourcepawn/${SR_SP_ARCH}/libsourcepawn.so")
     set(SR_SPCOMP "${SOURCEPAWN_BUILD}/spcomp/${SR_SP_ARCH}/spcomp")
 endif()
+
 function(sr_compile_script name source)
     add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/scripts/${name}.smx"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/scripts"
@@ -151,6 +171,7 @@ sr_compile_script(player_actions plugins/player_actions/player_actions.sp)
 sr_compile_script(moderation plugins/moderation/moderation.sp)
 sr_compile_script(communications plugins/communications/communications.sp)
 sr_compile_script(server plugins/server/server.sp)
+
 if(BUILD_TESTING)
     if(SR_TOPMENUS_EXTENSION)
         add_executable(sr_topmenus_test tests/topmenus_test.cpp)
@@ -160,7 +181,9 @@ if(BUILD_TESTING)
         sr_compile_script(topmenus tests/scripts/topmenus.sp)
         sr_compile_script(topmenus_contributor tests/scripts/topmenus_contributor.sp)
     endif()
+
     find_package(Threads REQUIRED)
+
     if(SR_SDKHOOKS_EXTENSION)
         sr_compile_script(sdkhooks tests/scripts/sdkhooks.sp)
         add_executable(sr_sdkhooks_test tests/sdkhooks_test.cpp)
@@ -168,6 +191,7 @@ if(BUILD_TESTING)
         add_test(NAME sdkhooks_backend COMMAND sr_sdkhooks_test)
         set_tests_properties(sdkhooks_backend PROPERTIES TIMEOUT 15)
     endif()
+
     if(SR_DHOOKS_EXTENSION)
         add_executable(sr_dhooks_test tests/dhooks_test.cpp)
         target_link_libraries(sr_dhooks_test PRIVATE sr_dhooks Threads::Threads)
@@ -180,6 +204,7 @@ if(BUILD_TESTING)
         add_test(NAME sdkcall_backend COMMAND sr_sdkcall_test)
         set_tests_properties(sdkcall_backend PROPERTIES TIMEOUT 15)
     endif()
+
     if(SR_COUNTERSTRIKE_EXTENSION)
         sr_compile_script(cstrike tests/scripts/cstrike.sp)
         add_executable(sr_cstrike_test tests/cstrike_test.cpp tests/cstrike_statistics.cpp tests/cstrike_rounds.cpp)
@@ -187,6 +212,7 @@ if(BUILD_TESTING)
         add_test(NAME cstrike_players COMMAND sr_cstrike_test)
         set_tests_properties(cstrike_players PROPERTIES TIMEOUT 15)
     endif()
+
     if(SR_SDKTOOLS_EXTENSION)
         add_executable(sr_sdktools_test tests/sdktools_test.cpp)
         target_link_libraries(sr_sdktools_test PRIVATE sr_sdktools Threads::Threads)
@@ -196,6 +222,7 @@ if(BUILD_TESTING)
         sr_compile_script(entity_construction tests/scripts/entity_construction.sp)
         sr_compile_script(entity_input tests/scripts/entity_input.sp)
     endif()
+
     if(SR_HTTP_EXTENSION)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
         find_program(SR_TEST_OPENSSL NAMES openssl REQUIRED)
@@ -210,6 +237,7 @@ if(BUILD_TESTING)
             --root "${CMAKE_BINARY_DIR}/test-fixtures/http-backend" --openssl "${SR_TEST_OPENSSL}" -- $<TARGET_FILE:sr_http_test>)
         set_tests_properties(http_backend PROPERTIES TIMEOUT 65)
     endif()
+
     if(SR_REGEX_EXTENSION)
         add_executable(sr_regex_test tests/regex_test.cpp)
         target_link_libraries(sr_regex_test PRIVATE sr_regex Threads::Threads)
@@ -217,6 +245,7 @@ if(BUILD_TESTING)
         set_tests_properties(regex_backend PROPERTIES TIMEOUT 15)
         sr_compile_script(regex tests/scripts/regex.sp)
     endif()
+
     if(SR_GEOIP_EXTENSION)
         add_executable(sr_geoip_test tests/geoip_test.cpp)
         target_link_libraries(sr_geoip_test PRIVATE sr_geoip Threads::Threads)
@@ -224,11 +253,13 @@ if(BUILD_TESTING)
         set_tests_properties(geoip_backend PROPERTIES TIMEOUT 30)
         sr_compile_script(geoip tests/scripts/geoip.sp)
     endif()
+
     add_executable(sr_work_queue_test tests/work_queue_test.cpp)
     target_include_directories(sr_work_queue_test PRIVATE include)
     target_link_libraries(sr_work_queue_test PRIVATE Threads::Threads)
     add_test(NAME extension_worker_queue COMMAND sr_work_queue_test)
     set_tests_properties(extension_worker_queue PROPERTIES TIMEOUT 15)
+
     if(SR_DATABASE_EXTENSION)
         add_executable(sr_clientprefs_test tests/clientprefs_test.cpp)
         target_link_libraries(sr_clientprefs_test PRIVATE sr_clientprefs)
@@ -261,6 +292,7 @@ if(BUILD_TESTING)
         add_executable(sr_database_settings_test tests/database_settings_test.cpp)
         target_link_libraries(sr_database_settings_test PRIVATE sr_database)
         add_test(NAME database_configuration COMMAND sr_database_settings_test "${CMAKE_BINARY_DIR}/test-fixtures/database-settings")
+
         if(SR_POSTGRESQL_DRIVER)
             add_executable(sr_postgresql_test tests/postgresql_test.cpp)
             target_link_libraries(sr_postgresql_test PRIVATE sr_postgresql)
@@ -270,16 +302,19 @@ if(BUILD_TESTING)
             add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/scripts/database_postgresql.smx" APPEND DEPENDS tests/scripts/database_async.sp)
             set(SR_POSTGRESQL_TEST_CONFIG "" CACHE FILEPATH "Private configuration for opt-in PostgreSQL integration tests")
             set(SR_POSTGRESQL_TEST_BAD_CA "" CACHE FILEPATH "Untrusted CA for PostgreSQL TLS integration tests")
+
             if(SR_POSTGRESQL_TEST_CONFIG AND SR_POSTGRESQL_TEST_BAD_CA)
                 add_test(NAME postgresql_driver COMMAND sr_postgresql_test "${SR_POSTGRESQL_TEST_CONFIG}" "${SR_POSTGRESQL_TEST_BAD_CA}")
                 set_tests_properties(postgresql_driver PROPERTIES TIMEOUT 45 RESOURCE_LOCK postgresql_database)
             endif()
         endif()
+
         if(SR_MYSQL_DRIVER)
             add_executable(sr_mysql_test tests/mysql_test.cpp)
             target_link_libraries(sr_mysql_test PRIVATE sr_mysql)
             set(SR_DATABASE_TEST_CONFIG "" CACHE FILEPATH "Private configuration for opt-in database integration tests")
             set(SR_DATABASE_TEST_BAD_CA "" CACHE FILEPATH "Untrusted CA for database TLS integration tests")
+
             if(SR_DATABASE_TEST_CONFIG AND SR_DATABASE_TEST_BAD_CA)
                 add_test(NAME clientprefs_mysql COMMAND sr_clientprefs_configured_test "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-mysql" "${SR_DATABASE_TEST_CONFIG}")
                 set_tests_properties(clientprefs_mysql PROPERTIES TIMEOUT 60 RESOURCE_LOCK shared_database)
@@ -288,6 +323,7 @@ if(BUILD_TESTING)
             endif()
         endif()
     endif()
+
     sr_compile_script(native_calls tests/scripts/native_calls.sp)
     add_executable(sr_native_calls_test tests/native_calls_test.cpp)
     target_link_libraries(sr_native_calls_test PRIVATE sr_foundation)
@@ -342,6 +378,7 @@ if(BUILD_TESTING)
     target_include_directories(sr_example_test PRIVATE include)
     target_link_libraries(sr_example_test PRIVATE KeelS2::SDK KeelS2::SourceSDK)
     set(SR_KEELS2_BUILD "" CACHE PATH "Matching KeelS2 build for native host integration")
+
     if(SR_KEELS2_BUILD)
         sr_compile_script(persistent_module tests/scripts/persistent_module.sp)
         add_library(sr_persistent_module_fixture MODULE tests/persistent_module_fixture.cpp)
@@ -358,17 +395,21 @@ if(BUILD_TESTING)
         add_library(sr_host_adapter MODULE tests/host_adapter.cpp)
         target_compile_definitions(sr_host_adapter PRIVATE KEELS2_GAME_ADAPTER_BUILD)
         target_link_libraries(sr_host_adapter PRIVATE KeelS2::AdapterSDK sr_host_commands sr_host_engine)
+
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             target_link_options(sr_host_adapter PRIVATE "LINKER:--exclude-libs,ALL")
         endif()
+
         if(SR_SANITIZERS AND NOT MSVC)
             set_source_files_properties(tests/host_network_fixture.cpp PROPERTIES COMPILE_OPTIONS -fno-sanitize=vptr)
         endif()
+
         add_executable(sr_module_integration tests/module_integration.cpp)
         target_link_libraries(sr_module_integration PRIVATE KeelS2::SDK ${CMAKE_DL_LIBS})
         # Package checks must load only the archived extension dependencies.
         add_executable(sr_package_integration tests/module_integration.cpp)
         target_link_libraries(sr_package_integration PRIVATE KeelS2::SDK ${CMAKE_DL_LIBS})
+
         if(WIN32)
             set(SR_HOST_PLATFORM win64)
             set(SR_HOST_NAME keels2_host.dll)
@@ -378,13 +419,16 @@ if(BUILD_TESTING)
             set(SR_HOST_NAME libkeels2_host.so)
             set(SR_TIER0_NAME libtier0.so)
         endif()
+
         if(WIN32 AND CMAKE_CONFIGURATION_TYPES)
             set(SR_TEST_LIBRARY_DIR "${SR_KEELS2_BUILD}/$<CONFIG>")
         else()
             set(SR_TEST_LIBRARY_DIR "${SR_KEELS2_BUILD}")
         endif()
+
         set(SR_TIER0_LIBRARY "${SR_TEST_LIBRARY_DIR}/${SR_TIER0_NAME}")
         add_test(NAME extension_authoring COMMAND sr_extension_authoring_test)
+
         if(WIN32)
             set_property(TEST extension_authoring APPEND PROPERTY ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:${SR_TEST_LIBRARY_DIR}")
@@ -392,6 +436,7 @@ if(BUILD_TESTING)
             set_property(TEST extension_authoring APPEND PROPERTY ENVIRONMENT_MODIFICATION
                 "LD_LIBRARY_PATH=path_list_prepend:${SR_TEST_LIBRARY_DIR}")
         endif()
+
         add_test(NAME native_modules COMMAND sr_module_integration
             "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
             $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:sr_example>
@@ -411,6 +456,7 @@ if(BUILD_TESTING)
             "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/persistent_module.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
             "${CMAKE_BINARY_DIR}/test-fixtures/persistent-module" "persistent" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
         set_tests_properties(persistent_callback_module PROPERTIES TIMEOUT 30)
+
         if(SR_TOPMENUS_EXTENSION)
             add_test(NAME topmenus_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -419,6 +465,7 @@ if(BUILD_TESTING)
                 "${CMAKE_BINARY_DIR}/test-fixtures/topmenus-module" "topmenus" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(topmenus_native_module PROPERTIES TIMEOUT 30)
         endif()
+
         if(SR_SDKHOOKS_EXTENSION)
             add_test(NAME sdkhooks_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -427,6 +474,7 @@ if(BUILD_TESTING)
                 "${CMAKE_BINARY_DIR}/test-fixtures/sdkhooks-module" "sdkhooks" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(sdkhooks_native_module PROPERTIES TIMEOUT 30)
         endif()
+
         if(SR_DHOOKS_EXTENSION)
             add_test(NAME dhooks_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -441,6 +489,7 @@ if(BUILD_TESTING)
                 "${CMAKE_BINARY_DIR}/test-fixtures/sdkcall-module" "sdkcall" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(sdkcall_native_module PROPERTIES TIMEOUT 30)
         endif()
+
         if(SR_HTTP_EXTENSION)
             add_test(NAME http_native_module COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/http_fixture.py"
                 --root "${CMAKE_BINARY_DIR}/test-fixtures/http-module-server" --openssl "${SR_TEST_OPENSSL}" -- $<TARGET_FILE:sr_module_integration>
@@ -451,6 +500,7 @@ if(BUILD_TESTING)
             set_tests_properties(http_native_module PROPERTIES TIMEOUT 65
                 ENVIRONMENT "SR_HTTP_NATIVE_MODULE=$<TARGET_FILE:sr_http_native_fixture>")
         endif()
+
         if(SR_REGEX_EXTENSION)
             add_test(NAME regex_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -459,6 +509,7 @@ if(BUILD_TESTING)
                 "${CMAKE_BINARY_DIR}/test-fixtures/regex-module" "regex" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(regex_native_module PROPERTIES TIMEOUT 30)
         endif()
+
         if(SR_COUNTERSTRIKE_EXTENSION)
             add_test(NAME cstrike_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -467,6 +518,7 @@ if(BUILD_TESTING)
                 "${CMAKE_BINARY_DIR}/test-fixtures/cstrike-module" "cstrike" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(cstrike_native_module PROPERTIES TIMEOUT 30)
         endif()
+
         if(SR_SDKTOOLS_EXTENSION)
             if(SR_SDKHOOKS_EXTENSION)
                 add_test(NAME entity_construction_native_module COMMAND sr_module_integration
@@ -477,6 +529,7 @@ if(BUILD_TESTING)
                     $<TARGET_FILE:source2root_sdkhooks>)
                 set_tests_properties(entity_construction_native_module PROPERTIES TIMEOUT 30)
             endif()
+
             add_test(NAME entity_input_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
                 $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_sdktools>
@@ -490,6 +543,7 @@ if(BUILD_TESTING)
                 "${CMAKE_BINARY_DIR}/test-fixtures/sdktools-module" "sdktools" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(sdktools_native_module PROPERTIES TIMEOUT 30)
         endif()
+
         if(SR_GEOIP_EXTENSION)
             add_test(NAME geoip_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -499,6 +553,7 @@ if(BUILD_TESTING)
             set_tests_properties(geoip_native_module PROPERTIES TIMEOUT 30
                 ENVIRONMENT "SR_GEOIP_TEST_DATA=${SR_MAXMIND_SOURCE}/t/maxmind-db/test-data")
         endif()
+
         if(SR_DATABASE_EXTENSION)
             target_link_libraries(sr_module_integration PRIVATE sr_clientprefs)
             target_compile_definitions(sr_module_integration PRIVATE SR_PREFS_TEST=1)
@@ -508,6 +563,7 @@ if(BUILD_TESTING)
                 "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/clientprefs.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
                 "${CMAKE_BINARY_DIR}/test-fixtures/clientprefs-module" "clientprefs" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(clientprefs_native_module PROPERTIES TIMEOUT 30)
+
             if(SR_MYSQL_DRIVER AND SR_DATABASE_TEST_CONFIG)
                 add_test(NAME clientprefs_mysql_module COMMAND sr_module_integration
                     "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -517,6 +573,7 @@ if(BUILD_TESTING)
                 set_tests_properties(clientprefs_mysql_module PROPERTIES TIMEOUT 60 RESOURCE_LOCK shared_database
                     ENVIRONMENT "SR_DATABASE_TEST_CONFIG=${SR_DATABASE_TEST_CONFIG};SR_PREFS_SQL_MODULE=$<TARGET_FILE:source2root_database>")
             endif()
+
             add_test(NAME database_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
                 $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_database>
@@ -535,6 +592,7 @@ if(BUILD_TESTING)
                 "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/database_configured.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
                 "${CMAKE_BINARY_DIR}/test-fixtures/database-configured" "database_configured" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
             set_tests_properties(database_configured_module PROPERTIES TIMEOUT 30)
+
             if(SR_POSTGRESQL_DRIVER AND SR_POSTGRESQL_TEST_CONFIG)
                 add_test(NAME postgresql_native_module COMMAND sr_module_integration
                     "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -544,6 +602,7 @@ if(BUILD_TESTING)
                 set_tests_properties(postgresql_native_module PROPERTIES TIMEOUT 30 RESOURCE_LOCK postgresql_database
                     ENVIRONMENT "SR_DATABASE_TEST_CONFIG=${SR_POSTGRESQL_TEST_CONFIG}")
             endif()
+
             if(SR_MYSQL_DRIVER AND SR_DATABASE_TEST_CONFIG)
                 add_test(NAME mysql_native_module COMMAND sr_module_integration
                     "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
@@ -555,6 +614,7 @@ if(BUILD_TESTING)
             endif()
         endif()
     endif()
+
     set(SR_EVENT_DESCRIPTORS "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb")
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/test-fixtures")
     add_custom_command(OUTPUT "${SR_EVENT_DESCRIPTORS}"
@@ -567,15 +627,20 @@ if(BUILD_TESTING)
     add_custom_target(sr_event_descriptors DEPENDS "${SR_EVENT_DESCRIPTORS}")
     add_executable(sr_menu_packet_test tests/menu_packet_test.cpp)
     add_dependencies(sr_menu_packet_test sr_event_descriptors)
+
     if(TARGET sr_host_adapter)
         add_dependencies(sr_host_adapter sr_event_descriptors)
     endif()
+
     target_link_libraries(sr_menu_packet_test PRIVATE sr_cs2_menu)
+
     if(SR_SANITIZERS AND NOT MSVC)
         target_compile_options(sr_cs2_menu PRIVATE -fno-sanitize=vptr)
         target_compile_options(sr_menu_packet_test PRIVATE -fno-sanitize=vptr)
     endif()
+
     add_test(NAME menu_packets COMMAND sr_menu_packet_test "${SR_EVENT_DESCRIPTORS}")
+
     if(SR_KEELS2_BUILD)
         if(WIN32)
             set_tests_properties(menu_packets PROPERTIES ENVIRONMENT_MODIFICATION
@@ -585,6 +650,7 @@ if(BUILD_TESTING)
                 "LD_LIBRARY_PATH=path_list_prepend:${SR_TEST_LIBRARY_DIR}")
         endif()
     endif()
+
     add_executable(sr_menu_test tests/menu_test.cpp)
     target_link_libraries(sr_menu_test PRIVATE sr_menu)
     add_test(NAME menu_state COMMAND sr_menu_test)
@@ -697,6 +763,7 @@ if(BUILD_TESTING)
         "${CMAKE_SOURCE_DIR}/tools/migrate_admins.py" $<TARGET_FILE:sr_permissions_test>)
     add_test(NAME install_configuration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/install_test.py"
         "${CMAKE_SOURCE_DIR}/tools/live.py")
+
     if(WIN32 AND TARGET libmariadb)
         get_property(sr_tests DIRECTORY PROPERTY TESTS)
         set_property(TEST ${sr_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION

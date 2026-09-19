@@ -1,4 +1,5 @@
 option(SR_COUNTERSTRIKE_EXTENSION "Build CS2 player management, statistics and round scripting extension" ON)
+
 if(SR_COUNTERSTRIKE_EXTENSION)
     sr_entity_backend()
     add_library(sr_cstrike STATIC extensions/cstrike/players.cpp extensions/cstrike/statistics.cpp extensions/cstrike/rounds.cpp)
@@ -8,6 +9,7 @@ if(SR_COUNTERSTRIKE_EXTENSION)
     target_compile_definitions(source2root_cstrike PRIVATE KEELS2_PLUGIN_BUILD)
     target_include_directories(source2root_cstrike PRIVATE include)
     target_link_libraries(source2root_cstrike PRIVATE sr_cstrike KeelS2::SourceSDK)
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(source2root_cstrike PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
     endif()

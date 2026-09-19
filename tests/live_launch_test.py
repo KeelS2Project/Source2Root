@@ -81,6 +81,7 @@ for line in sys.stdin:
                 return original_popen([sys.executable, str(fixture), *(["missing"] if missing_plugin else [])], **kwargs)
 
             args = SimpleNamespace(server=server, evidence=evidence, port=27035, smoke=True)
+
             with patch.object(live, "stopped"), patch.object(live.subprocess, "Popen", side_effect=start), \
                     contextlib.redirect_stdout(io.StringIO()):
                 if missing_plugin:
@@ -88,6 +89,7 @@ for line in sys.stdin:
                         live.launch(args)
                 else:
                     live.launch(args)
+
             self.assertEqual(len(launched), 1)
             self.assertNotIn("-insecure", launched[0])
             self.assertEqual(config.read_bytes(), b"operator configuration\n")

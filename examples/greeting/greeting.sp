@@ -18,12 +18,15 @@ public void Greeting(Player caller, const char[] arguments)
         ReplyToCommand(caller, "Usage: sr_greeting");
         return;
     }
+
     int active;
     char text[513];
+
     if (!GetConVarInt(enabled, active) || !GetConVarString(message, text, sizeof(text)))
     {
         ReplyToCommand(caller, "Could not read the greeting settings.");
         return;
     }
+
     ReplyToCommand(caller, active ? text : "The greeting command is disabled.");
 }

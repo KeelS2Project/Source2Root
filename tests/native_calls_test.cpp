@@ -7,7 +7,10 @@
 #include <iostream>
 #include <thread>
 
-static void Check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+static void Check(bool value, const char* message) {
+    if (!value)
+        throw std::runtime_error(message);
+}
 
 class Host final : public sr::GameHost {
 public:
@@ -16,28 +19,67 @@ public:
     sr::Player player{3, 7, 76561198000000001ull, true, false, "Native identity fixture"};
     bool snapshot_failure = false;
     KeelResult Lookup(int slot, sr::Player& output) override {
-        if (slot != player.slot) return KEEL_RESULT_NOT_FOUND;
-        output = player; return KEEL_RESULT_OK;
+        if (slot != player.slot)
+            return KEEL_RESULT_NOT_FOUND;
+
+        output = player;
+        return KEEL_RESULT_OK;
     }
+
     KeelResult NextPlayer(int after, sr::Player& output) override {
-        if (snapshot_failure && after >= 0) return KEEL_RESULT_ENGINE_FAILURE;
-        if (after >= player.slot) return KEEL_RESULT_NOT_FOUND;
-        output = player; return KEEL_RESULT_OK;
+        if (snapshot_failure && after >= 0)
+            return KEEL_RESULT_ENGINE_FAILURE;
+
+        if (after >= player.slot)
+            return KEEL_RESULT_NOT_FOUND;
+
+        output = player;
+        return KEEL_RESULT_OK;
     }
-    KeelResult Reply(const sr::Player*, const std::string&) override { return KEEL_RESULT_OK; }
+
+    KeelResult Reply(const sr::Player*, const std::string&) override {
+        return KEEL_RESULT_OK;
+    }
+
     void Log(const std::string& text) override {
-        if (text.find("resource valid during stop") != std::string::npos) ++stopped;
+        if (text.find("resource valid during stop") != std::string::npos)
+            ++stopped;
+
         std::cout << text << '\n';
     }
-    KeelResult RegisterCommand(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RemoveCommand(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult ListenEvent(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RemoveEvent(const std::string&) override { return KEEL_RESULT_OK; }
-    KeelResult RenderMenu(const sr::Player&, const std::string&, int) override { return KEEL_RESULT_UNSUPPORTED; }
-    KeelResult AcquireProvider(const std::string&, unsigned) override { ++leases; return KEEL_RESULT_OK; }
+
+    KeelResult RegisterCommand(const std::string&) override {
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult RemoveCommand(const std::string&) override {
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult ListenEvent(const std::string&) override {
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult RemoveEvent(const std::string&) override {
+        return KEEL_RESULT_OK;
+    }
+
+    KeelResult RenderMenu(const sr::Player&, const std::string&, int) override {
+        return KEEL_RESULT_UNSUPPORTED;
+    }
+
+    KeelResult AcquireProvider(const std::string&, unsigned) override {
+        ++leases;
+        return KEEL_RESULT_OK;
+    }
+
     KeelResult ReleaseProvider(const std::string&, unsigned) override {
-        if (release_failure) return KEEL_RESULT_BUSY;
-        if (!leases) return KEEL_RESULT_ENGINE_FAILURE;
+        if (release_failure)
+            return KEEL_RESULT_BUSY;
+
+        if (!leases)
+            return KEEL_RESULT_ENGINE_FAILURE;
+
         --leases;
         return KEEL_RESULT_OK;
     }
@@ -63,18 +105,26 @@ struct Probe {
             auto& probe = *static_cast<Probe*>(raw);
             source2root::NativeCall call(*api);
             const auto operation = call.Int(1);
+
             if (operation == 4) {
                 SrPlayerIdentity identity{};
                 Check(call.Player(call.Int(2), identity) && identity.slot == 3 && identity.connection == 7 &&
-                    identity.steam_id == probe.host.player.steam_id && identity.authenticated && !identity.bot, "owned live player identity");
-                if (probe.first_owner != call.Owner()) Check(!call.Player(probe.first_player, identity), "foreign player handle refused");
-                else probe.first_player = call.Int(2);
+                          identity.steam_id == probe.host.player.steam_id && identity.authenticated && !identity.bot,
+                      "owned live player identity");
+
+                if (probe.first_owner != call.Owner())
+                    Check(!call.Player(probe.first_player, identity), "foreign player handle refused");
+                else
+                    probe.first_player = call.Int(2);
+
                 ++probe.host.player.connection;
                 Check(!call.Player(call.Int(2), identity) && !identity.connection, "stale player handle clears output");
                 --probe.host.player.connection;
                 *result = 1;
             } else if (operation == 0) {
-                Check(probe.foundation.UnregisterNative(100, probe.registration) == KEEL_RESULT_BUSY, "active native cannot unregister");
+                Check(probe.foundation.UnregisterNative(100, probe.registration) == KEEL_RESULT_BUSY,
+                      "active native cannot unregister");
+
                 Check(call.String(3) == "native text", "string input");
                 const auto values = call.Array(6, call.Int(7));
                 Check(values.size() == 3, "array input");
@@ -82,10 +132,19 @@ struct Probe {
                 call.OutputArray(6, 3, {31});
                 call.OutputCell(8, 42);
                 Check(!call.DataPath().empty() && !call.DataPath(true).empty(), "owned and shared data paths");
-                Check(std::filesystem::path(call.ConfigPath()).generic_string().ends_with("configs/extensions/test.native") &&
-                    (call.ScriptId() == "first" || call.ScriptId() == "second"), "extension configuration scope and actual plugin identity");
+                Check(std::filesystem::path(call.ConfigPath())
+                              .generic_string()
+                              .ends_with("configs/extensions/test.native") &&
+                          (call.ScriptId() == "first" || call.ScriptId() == "second"),
+                      "extension configuration scope and actual plugin identity");
+
                 *result = call.Own(7, std::make_unique<Value>(&probe.host));
-                if (!probe.first) { probe.first = *result; probe.first_owner = call.Owner(); }
+
+                if (!probe.first) {
+                    probe.first = *result;
+                    probe.first_owner = call.Owner();
+                }
+
                 ++probe.creations;
             } else if (operation == 1) {
                 void* value = nullptr;
@@ -97,26 +156,41 @@ struct Probe {
                 void* value = nullptr;
                 Check(api->get_resource(api->context, call.Int(2), 999, &value) == KEEL_RESULT_INVALID_ARGUMENT && !value,
                     "wrong-type resource rejected");
+
                 Check(api->write_string(api->context, 4, 4097, "bad") == KEEL_RESULT_INVALID_ARGUMENT,
                     "oversized output rejected");
+
                 Check(api->read_cell(api->context, 99, result) == KEEL_RESULT_INVALID_ARGUMENT,
                     "argument index checked");
+
                 Check(api->read_array(api->context, 6, nullptr, 1025) == KEEL_RESULT_INVALID_ARGUMENT,
                     "array limit checked");
+
                 KeelResult off_thread = KEEL_RESULT_OK;
-                std::thread worker([&] { int32_t value = 0; off_thread = api->read_cell(api->context, 1, &value); });
+                std::thread worker([&] {
+                    int32_t value = 0;
+                    off_thread = api->read_cell(api->context, 1, &value);
+                });
                 worker.join();
                 Check(off_thread != KEEL_RESULT_OK, "VM operations restricted to game thread");
+
                 if (probe.first_owner != call.Owner()) {
                     Check(api->get_resource(api->context, probe.first, 7, &value) == KEEL_RESULT_INVALID_ARGUMENT,
                         "another script cannot read a foreign resource");
+
                     ++probe.foreign_refusals;
                 }
+
                 *result = 1;
             }
+
             return KEEL_RESULT_OK;
         } catch (const std::exception& failure) {
-            if (error && capacity) { std::strncpy(error, failure.what(), capacity - 1); error[capacity - 1] = 0; }
+            if (error && capacity) {
+                std::strncpy(error, failure.what(), capacity - 1);
+                error[capacity - 1] = 0;
+            }
+
             return KEEL_RESULT_ENGINE_FAILURE;
         }
     }
@@ -133,12 +207,15 @@ int main(int argc, char** argv) {
         std::uint32_t player_count = 9;
         Check(foundation.NativePlayerSnapshot(players.data(), players.size(), &player_count) == KEEL_RESULT_OK &&
             player_count == 1 && players[0].connection == 7, "complete live player snapshot");
+
         host.snapshot_failure = true;
         Check(foundation.NativePlayerSnapshot(players.data(), players.size(), &player_count) == KEEL_RESULT_ENGINE_FAILURE &&
             player_count == 0, "incomplete player snapshot exposes no partial count");
+
         host.snapshot_failure = false;
         SrContextNativeSpec spec{sizeof(spec), SR_NATIVE_API_VERSION, "ExtensionProbe", 8, 0,
             "test.native", 1, &Probe::Call, &probe};
+
         Check(foundation.RegisterContextNative(100, spec, probe.registration) == KEEL_RESULT_OK, "register rich native");
         spec.name = "OtherExtensionProbe";
         spec.provider_service = "test.other";
@@ -151,41 +228,70 @@ int main(int argc, char** argv) {
             const auto manifest = directory / "plugin.json";
             std::ofstream(manifest) << "{\"schema\":1,\"id\":\"" << id << "\",\"name\":\"native fixture\",\"author\":\"tests\","
                 "\"version\":\"1.0.0\",\"api\":2,\"entry\":\"main.smx\",\"enabled\":true,\"dependencies\":[]}";
+
             return manifest;
         };
-        Check(foundation.Load(install("first")) && foundation.Load(install("second")), "real scripts use native memory and owned resources");
+        Check(foundation.Load(install("first")) && foundation.Load(install("second")),
+              "real scripts use native memory and owned resources");
+
         Check(probe.foreign_refusals == 1 && host.destroyed == 2, "foreign ownership and explicit close verified");
         Check(foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_OK &&
-            foundation.NativeConsumerStatus(999, probe.first_owner) == KEEL_RESULT_INVALID_ARGUMENT, "consumer status verifies provider lease");
+                  foundation.NativeConsumerStatus(999, probe.first_owner) == KEEL_RESULT_INVALID_ARGUMENT,
+              "consumer status verifies provider lease");
+
         KeelPlayerConnection connection{host.player.slot, 0, host.player.connection};
         sr::Cell player_handle = 99;
         KeelBool allowed = KEEL_TRUE;
         Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_OK &&
             player_handle == probe.first_player, "consumer service reuses this script's player handle");
+
         Check(foundation.ConsumerPlayer(999, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_INVALID_ARGUMENT &&
             !player_handle, "foreign provider cannot create a consumer player handle");
+
         Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_OK && allowed,
             "public permission checks a current consumer connection");
-        Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "admin.root", &allowed) == KEEL_RESULT_OK && !allowed,
-            "consumer permissions use current core rules");
-        Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "bad..permission", &allowed) == KEEL_RESULT_INVALID_ARGUMENT && !allowed,
-            "consumer invalid permission clears output");
+
+        Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "admin.root", &allowed) ==
+                      KEEL_RESULT_OK &&
+                  !allowed,
+              "consumer permissions use current core rules");
+
+        Check(foundation.ConsumerPermission(100, probe.first_owner, &connection, "bad..permission", &allowed) ==
+                      KEEL_RESULT_INVALID_ARGUMENT &&
+                  !allowed,
+              "consumer invalid permission clears output");
+
         ++connection.generation;
-        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_NOT_FOUND && !player_handle &&
-            foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_NOT_FOUND && !allowed,
-            "consumer service rejects stale connections");
+        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_NOT_FOUND &&
+                  !player_handle &&
+                  foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) ==
+                      KEEL_RESULT_NOT_FOUND &&
+                  !allowed,
+              "consumer service rejects stale connections");
+
         --connection.generation;
         Check(foundation.Pause("first") && foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_BUSY,
             "consumer status distinguishes paused and running generations");
-        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_BUSY && !player_handle &&
-            foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_BUSY && !allowed,
-            "paused consumers cannot acquire player context or permissions");
+
+        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_BUSY &&
+                  !player_handle &&
+                  foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) ==
+                      KEEL_RESULT_BUSY &&
+                  !allowed,
+              "paused consumers cannot acquire player context or permissions");
+
         Check(foundation.Resume("first"), "resume consumer");
         Check(foundation.Reload("first"), "staged reload owns distinct resources");
-        Check(foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_NOT_FOUND, "retired consumer generation never becomes active again");
-        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_NOT_FOUND && !player_handle &&
-            foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) == KEEL_RESULT_NOT_FOUND && !allowed,
-            "old generations cannot recover consumer context after reload");
+        Check(foundation.NativeConsumerStatus(100, probe.first_owner) == KEEL_RESULT_NOT_FOUND,
+              "retired consumer generation never becomes active again");
+
+        Check(foundation.ConsumerPlayer(100, probe.first_owner, &connection, &player_handle) == KEEL_RESULT_NOT_FOUND &&
+                  !player_handle &&
+                  foundation.ConsumerPermission(100, probe.first_owner, &connection, "", &allowed) ==
+                      KEEL_RESULT_NOT_FOUND &&
+                  !allowed,
+              "old generations cannot recover consumer context after reload");
+
         Check(host.stopped == 1 && host.destroyed == 4, "retired script cleanup");
         Check(foundation.UnregisterNative(100, probe.registration) == KEEL_RESULT_BUSY, "retained providers refuse unload");
         Check(foundation.Unload("second"), "release second script before last-consumer failure");
@@ -196,9 +302,14 @@ int main(int argc, char** argv) {
         Check(foundation.Unload("first") && host.destroyed == destroyed, "retry does not double destroy");
         Check(foundation.Shutdown() && host.leases == 0 && host.destroyed == probe.creations && host.destruction_with_lease,
             "all resources destroyed while provider code remains leased");
+
         Check(foundation.UnregisterNative(100, probe.registration) == KEEL_RESULT_OK &&
             foundation.UnregisterNative(200, other) == KEEL_RESULT_OK, "providers retire after scripts");
+
         std::cout << "Native memory, ownership, unload ordering and retry passed\n";
         return 0;
-    } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
 }

@@ -41,6 +41,7 @@ public:
     int Immunity(const Player& player) const;
     bool CanTarget(const Player* caller, const Player& target, const std::string& permission) const;
     bool CanTargetIdentity(const Player* caller, std::uint64_t target, const std::string& permission) const;
+
 private:
     std::map<std::uint64_t, Admin> admins_;
 };

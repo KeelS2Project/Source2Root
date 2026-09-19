@@ -11,6 +11,7 @@ enum RegexFlags {
     Regex_Extended = 8, Regex_Anchored = 16, Regex_DollarEndOnly = 32,
     Regex_Ungreedy = 64, Regex_UTF = 128, Regex_UCP = 256
 }
+
 // PCRE2 syntax; flags and handles are specific to Source2Root, not SourceMod.
 // Text is NUL-terminated, at most 4095 bytes. Pattern limits: 64 captures,
 // nesting 64, compiled size 256KiB, PCRE2 allocations 1MiB. Match allocations

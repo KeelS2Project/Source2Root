@@ -13,19 +13,40 @@
 #include <string>
 
 namespace source2root::sdktools {
-class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
+class Error : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 class Service;
+
 class Field final {
 public:
     ~Field();
     Field(const Field&) = delete;
     Field& operator=(const Field&) = delete;
-    unsigned Type() const { return type_; }
-    unsigned Size() const { return size_; }
-    const std::string& ClassName() const { return class_; }
-    const std::string& Name() const { return name_; }
-    const std::string& Profile() const { return profile_; }
+    unsigned Type() const {
+        return type_;
+    }
+
+    unsigned Size() const {
+        return size_;
+    }
+
+    const std::string& ClassName() const {
+        return class_;
+    }
+
+    const std::string& Name() const {
+        return name_;
+    }
+
+    const std::string& Profile() const {
+        return profile_;
+    }
+
     void Close();
+
 private:
     friend class Service;
     friend class Entity;
@@ -35,6 +56,7 @@ private:
     unsigned type_ = 0, size_ = 0;
     std::string class_, name_, profile_;
 };
+
 class Entity final {
 public:
     ~Entity();
@@ -48,6 +70,7 @@ public:
     void Input(const char* name, const KeelEntityInputValue& value, bool& invoked,
         const Entity* activator = nullptr, const Entity* caller = nullptr, const Entity* value_entity = nullptr,
         bool queued = false, float delay = 0) const;
+
     bool Same(const Entity& other) const;
     std::int32_t Integer(const Field& field) const;
     std::string IntegerText(const Field& field) const;
@@ -56,6 +79,7 @@ public:
     std::uint32_t SourceHandle(const Field& field) const;
     void Teleport(unsigned flags, const std::array<float,3>& position,
         const std::array<float,3>& angles, const std::array<float,3>& velocity) const;
+
     void SetModel(const std::string& model) const;
     void Remove() const;
     void SetInteger(const Field& field, std::int32_t value) const;
@@ -63,6 +87,7 @@ public:
     void SetNumber(const Field& field, float value) const;
     void SetVector(const Field& field, const std::array<float, 3>& value) const;
     void Close();
+
 private:
     friend class Service;
     Entity(std::shared_ptr<Service> service, KeelEntityHandle handle);
@@ -80,8 +105,16 @@ private:
 // Construct Service in a shared_ptr before acquiring resources.
 class Service final : public std::enable_shared_from_this<Service> {
 public:
-    Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes = nullptr, const KeelEntityToolsApi* tools = nullptr, const KeelEntityConstructionApi* construction = nullptr, const KeelEntityInputApi* input = nullptr);
+    Service(KeelPluginHandle plugin,
+            const KeelEntitiesApi& entities,
+            const KeelSchemaApi& schema,
+            const KeelPlayersApi& players,
+            const KeelNativeRuntimeApi& runtime,
+            const KeelEntityWritesApi* writes = nullptr,
+            const KeelEntityToolsApi* tools = nullptr,
+            const KeelEntityConstructionApi* construction = nullptr,
+            const KeelEntityInputApi* input = nullptr);
+
     std::array<unsigned,2> InputCapabilities();
     void ConstructionReady() const;
     std::unique_ptr<Entity> Create(const std::string& classname);
@@ -91,14 +124,21 @@ public:
     std::unique_ptr<Entity> FromSource(std::uint32_t handle);
     std::unique_ptr<Entity> FromPlayer(const KeelPlayerConnection& player, bool pawn);
     std::unique_ptr<Field> Resolve(const std::string& classname, const std::string& name, unsigned type);
-    unsigned EntityCount() const { return entity_count_; }
-    unsigned FieldCount() const { return field_count_; }
+    unsigned EntityCount() const {
+        return entity_count_;
+    }
+
+    unsigned FieldCount() const {
+        return field_count_;
+    }
+
 private:
     friend class Entity;
     friend class Field;
     void Thread() const;
     std::unique_ptr<Entity> Adopt(KeelEntityHandle handle);
-    KeelEntityInfo Describe(KeelEntityHandle handle, const KeelEntityInfo& expected, bool constructed, bool* pending = nullptr) const;
+    KeelEntityInfo
+    Describe(KeelEntityHandle handle, const KeelEntityInfo& expected, bool constructed, bool* pending = nullptr) const;
     KeelPlayerInfo Player(const KeelPlayerConnection& player) const;
     KeelPluginHandle plugin_;
     const KeelEntitiesApi entities_;

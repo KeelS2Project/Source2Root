@@ -1,4 +1,5 @@
 option(SR_HTTP_EXTENSION "Build asynchronous HTTP/Webternet extension" ON)
+
 if(SR_HTTP_EXTENSION)
     enable_language(C)
     include(FetchContent)
@@ -35,12 +36,14 @@ if(SR_HTTP_EXTENSION)
         set(USE_NGHTTP2 OFF)
         set(CURL_ZLIB ON CACHE STRING "Source2Root HTTP compression selection" FORCE)
         set(ENABLE_THREADED_RESOLVER ON)
+
         if(WIN32)
             set(CURL_USE_SCHANNEL ON)
             set(CURL_USE_OPENSSL OFF)
         else()
             set(CURL_USE_OPENSSL ON)
         endif()
+
         FetchContent_Declare(sr_curl URL "${url}" URL_HASH "SHA256=${hash}" DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
         FetchContent_MakeAvailable(sr_curl)
         set_property(DIRECTORY "${sr_curl_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_ALL TRUE)
@@ -55,6 +58,7 @@ if(SR_HTTP_EXTENSION)
     target_compile_definitions(source2root_http PRIVATE KEELS2_PLUGIN_BUILD)
     target_include_directories(source2root_http PRIVATE include)
     target_link_libraries(source2root_http PRIVATE sr_http Threads::Threads KeelS2::SDK KeelS2::SourceSDK)
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(source2root_http PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
     endif()

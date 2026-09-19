@@ -1,5 +1,6 @@
 include(CMakeFindDependencyMacro)
 find_dependency(KeelS2 1.0 CONFIG)
+
 if(NOT TARGET Source2Root::Extension)
     add_library(Source2Root::Extension INTERFACE IMPORTED)
     get_filename_component(_sr_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)

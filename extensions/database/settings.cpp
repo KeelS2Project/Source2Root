@@ -14,68 +14,138 @@ bool Name(const std::string& value) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
     });
 }
+
 void Keys(const Json& value, const std::set<std::string>& allowed) {
-    if (!value.is_object()) throw Error("Database configuration requires objects.");
-    for (const auto& [key, entry] : value.items()) if (!allowed.contains(key)) throw Error("Unknown database configuration field.");
+    if (!value.is_object())
+        throw Error("Database configuration requires objects.");
+
+    for (const auto& [key, entry] : value.items())
+        if (!allowed.contains(key))
+            throw Error("Unknown database configuration field.");
 }
+
 std::string Text(const Json& object, const char* key, const std::string& fallback = "", std::size_t limit = 1024) {
-    if (!object.contains(key)) return fallback;
-    if (!object.at(key).is_string()) throw Error("Database configuration field must be a string.");
+    if (!object.contains(key))
+        return fallback;
+
+    if (!object.at(key).is_string())
+        throw Error("Database configuration field must be a string.");
+
     auto value = object.at(key).get<std::string>();
-    if (value.size() > limit || std::any_of(value.begin(), value.end(), [](unsigned char c) { return c < 32 || c == 127; }))
+
+    if (value.size() > limit || std::any_of(value.begin(), value.end(), [](unsigned char c) {
+            return c < 32 || c == 127;
+        }))
         throw Error("Database configuration string is invalid.");
+
     return value;
 }
+
 unsigned Number(const Json& object, const char* key, unsigned fallback, unsigned maximum) {
-    if (!object.contains(key)) return fallback;
-    if (!object.at(key).is_number_unsigned()) throw Error("Database configuration field must be a positive integer.");
+    if (!object.contains(key))
+        return fallback;
+
+    if (!object.at(key).is_number_unsigned())
+        throw Error("Database configuration field must be a positive integer.");
+
     const auto value = object.at(key).get<std::uint64_t>();
-    if (!value || value > maximum) throw Error("Database configuration number is out of range.");
+
+    if (!value || value > maximum)
+        throw Error("Database configuration number is out of range.");
+
     return static_cast<unsigned>(value);
 }
 }
 
 Settings ReadSettings(const std::filesystem::path& file, const std::string& profile, const std::string& plugin) {
-    if (!Name(profile) || plugin.empty()) throw Error("Invalid database profile or plugin identity.");
+    if (!Name(profile) || plugin.empty())
+        throw Error("Invalid database profile or plugin identity.");
+
     std::ifstream stream(file, std::ios::binary);
-    if (!stream) throw Error("Database configuration is unavailable.");
+
+    if (!stream)
+        throw Error("Database configuration is unavailable.");
+
     std::array<char, 65537> buffer{};
     stream.read(buffer.data(), buffer.size());
     const auto length = stream.gcount();
-    if (length > 65536 || stream.bad()) throw Error("Database configuration is unreadable or exceeds 64 KiB.");
+
+    if (length > 65536 || stream.bad())
+        throw Error("Database configuration is unreadable or exceeds 64 KiB.");
+
     try {
         std::vector<std::set<std::string>> keys;
-        const auto json = Json::parse(buffer.data(), buffer.data() + length, [&](int, Json::parse_event_t event, Json& value) {
-            if (event == Json::parse_event_t::object_start) keys.emplace_back();
-            else if (event == Json::parse_event_t::object_end) keys.pop_back();
-            else if (event == Json::parse_event_t::key && !keys.back().insert(value.get<std::string>()).second)
-                throw Error("Duplicate database configuration field.");
-            return true;
-        });
+        const auto json =
+            Json::parse(buffer.data(), buffer.data() + length, [&](int, Json::parse_event_t event, Json& value) {
+                if (event == Json::parse_event_t::object_start)
+                    keys.emplace_back();
+                else if (event == Json::parse_event_t::object_end)
+                    keys.pop_back();
+                else if (event == Json::parse_event_t::key && !keys.back().insert(value.get<std::string>()).second)
+                    throw Error("Duplicate database configuration field.");
+
+                return true;
+            });
+
         Keys(json, {"schema", "connections"});
+
         if (json.value("schema", 0) != 1 || !json.at("connections").is_object() || json.at("connections").size() > 64)
             throw Error("Unsupported database configuration schema.");
-        if (!json.at("connections").contains(profile)) throw Error("Database profile was not found.");
+
+        if (!json.at("connections").contains(profile))
+            throw Error("Database profile was not found.");
+
         const auto& config = json.at("connections").at(profile);
-        Keys(config, {"driver", "database", "allow_plugins", "host", "port", "user", "password", "socket", "tls", "ca", "timeout"});
+        Keys(config,
+             {"driver",
+              "database",
+              "allow_plugins",
+              "host",
+              "port",
+              "user",
+              "password",
+              "socket",
+              "tls",
+              "ca",
+              "timeout"});
+
         const auto& allowed = config.at("allow_plugins");
-        if (!allowed.is_array() || allowed.empty() || allowed.size() > 128) throw Error("Database profile needs an explicit plugin allow list.");
+
+        if (!allowed.is_array() || allowed.empty() || allowed.size() > 128)
+            throw Error("Database profile needs an explicit plugin allow list.");
+
         bool permitted = false;
+
         for (const auto& entry : allowed) {
-            if (!entry.is_string()) throw Error("Invalid database plugin allow list.");
-            if (entry == plugin || entry == "*") permitted = true;
+            if (!entry.is_string())
+                throw Error("Invalid database plugin allow list.");
+
+            if (entry == plugin || entry == "*")
+                permitted = true;
         }
-        if (!permitted) throw Error("This plugin is not allowed to use the database profile.");
+
+        if (!permitted)
+            throw Error("This plugin is not allowed to use the database profile.");
+
         Settings result;
         result.driver = Text(config, "driver");
         result.database = Text(config, "database", "", 64);
+
         if (result.driver == "sqlite") {
             Keys(config, {"driver", "database", "allow_plugins"});
-            if (!Name(result.database)) throw Error("Invalid configured SQLite database name.");
+
+            if (!Name(result.database))
+                throw Error("Invalid configured SQLite database name.");
+
             return result;
         }
-        if (result.driver != "mysql" && result.driver != "mariadb" && result.driver != "postgresql") throw Error("Unsupported database driver.");
-        if (result.database.empty()) throw Error("Database name is required.");
+
+        if (result.driver != "mysql" && result.driver != "mariadb" && result.driver != "postgresql")
+            throw Error("Unsupported database driver.");
+
+        if (result.database.empty())
+            throw Error("Database name is required.");
+
         result.host = Text(config, "host", result.host, 255);
         result.user = Text(config, "user", "", 128);
         result.password = Text(config, "password");
@@ -84,36 +154,58 @@ Settings ReadSettings(const std::filesystem::path& file, const std::string& prof
         result.port = Number(config, "port", result.driver == "postgresql" ? 5432 : result.port, 65535);
         result.timeout = Number(config, "timeout", result.timeout, 30);
         result.tls = config.value("tls", true);
-        if (result.host.empty() || result.user.empty()) throw Error("Database host and user are required.");
+
+        if (result.host.empty() || result.user.empty())
+            throw Error("Database host and user are required.");
+
         if ((!result.socket.empty() && !std::filesystem::path(result.socket).is_absolute()) ||
             (!result.ca.empty() && !std::filesystem::path(result.ca).is_absolute()))
             throw Error("Database socket and CA paths must be absolute.");
-        if (!result.tls && result.socket.empty() && result.host != "127.0.0.1" && result.host != "::1" && result.host != "localhost")
+
+        if (!result.tls && result.socket.empty() && result.host != "127.0.0.1" && result.host != "::1" &&
+            result.host != "localhost")
             throw Error("Remote database connections require verified TLS.");
-        if (result.driver == "postgresql") ValidatePostgreSQLSettings(result);
+
+        if (result.driver == "postgresql")
+            ValidatePostgreSQLSettings(result);
+
         return result;
-    } catch (const Error&) { throw; }
-    catch (const std::exception&) { throw Error("Invalid database configuration."); }
+    } catch (const Error&) {
+        throw;
+    } catch (const std::exception&) {
+        throw Error("Invalid database configuration.");
+    }
 }
 
 void ValidatePostgreSQLSettings(const Settings& settings) {
     const auto valid = [](const std::string& value, std::size_t limit) {
-        return value.size() <= limit && std::none_of(value.begin(), value.end(), [](unsigned char c) { return c < 32 || c == 127; });
+        return value.size() <= limit && std::none_of(value.begin(), value.end(), [](unsigned char c) {
+                   return c < 32 || c == 127;
+               });
     };
+
     if (settings.driver != "postgresql" || settings.database.empty() || settings.user.empty() || settings.host.empty() ||
         !valid(settings.database, 64) || !valid(settings.user, 128) || !valid(settings.password, 1024) ||
         !valid(settings.host, 255) || !valid(settings.socket, 1024) || !valid(settings.ca, 1024) ||
         !settings.port || settings.port > 65535 || !settings.timeout || settings.timeout > 30)
         throw Error("Invalid PostgreSQL connection settings.");
+
     if (std::any_of(settings.host.begin(), settings.host.end(), [](unsigned char c) {
-        return !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-            c == '.' || c == '-' || c == '_' || c == ':' || c == '%');
-    })) throw Error("PostgreSQL host must be one hostname or IP address; use socket for a Unix socket directory.");
-    if (!settings.ca.empty() && !std::filesystem::path(settings.ca).is_absolute()) throw Error("Database CA path must be absolute.");
+            return !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
+                     c == '-' || c == '_' || c == ':' || c == '%');
+        }))
+        throw Error("PostgreSQL host must be one hostname or IP address; use socket for a Unix socket directory.");
+
+    if (!settings.ca.empty() && !std::filesystem::path(settings.ca).is_absolute())
+        throw Error("Database CA path must be absolute.");
+
     if (!settings.socket.empty()) {
         if (!std::filesystem::path(settings.socket).is_absolute() || settings.socket.find(',') != std::string::npos)
             throw Error("PostgreSQL socket must be one absolute directory path.");
-        if (settings.tls) throw Error("PostgreSQL Unix sockets require explicit tls=false; libpq cannot negotiate TLS over Unix sockets.");
+
+        if (settings.tls)
+            throw Error(
+                "PostgreSQL Unix sockets require explicit tls=false; libpq cannot negotiate TLS over Unix sockets.");
     } else if (!settings.tls && settings.host != "127.0.0.1" && settings.host != "::1" && settings.host != "localhost")
         throw Error("Remote database connections require verified TLS.");
 }

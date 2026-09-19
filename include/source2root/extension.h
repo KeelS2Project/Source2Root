@@ -55,13 +55,16 @@ typedef struct SrExtensionApi {
     uint32_t size;
     uint32_t api_version;
     void* context;
+
     KeelResult (*register_native)(void* context, KeelPluginHandle owner,
         const SrNativeSpec* spec, SrRegistration* registration);
+
     KeelResult (*unregister_native)(void* context, KeelPluginHandle owner, SrRegistration registration);
     /* A failed open can still return a nonzero session if cleanup needs retry.
        Retain user_data until close_menu succeeds or returns NOT_FOUND. */
     KeelResult (*open_menu)(void* context, KeelPluginHandle owner,
         const KeelPlayerConnection* player, const SrMenuSpec* spec, SrMenuSession* session);
+
     KeelResult (*close_menu)(void* context, KeelPluginHandle owner, SrMenuSession session);
 } SrExtensionApi;
 

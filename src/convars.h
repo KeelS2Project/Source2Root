@@ -16,11 +16,15 @@ struct ConVarDefinition {
         return name == other.name && description == other.description && Same(initial, other.initial) &&
             Same(minimum, other.minimum) && Same(maximum, other.maximum);
     }
+
 private:
     static bool Same(const ConVarValue& a, const ConVarValue& b) {
-        if (a.index() != b.index()) return false;
+        if (a.index() != b.index())
+            return false;
+
         if (const auto* number = std::get_if<float>(&a))
             return std::bit_cast<std::uint32_t>(*number) == std::bit_cast<std::uint32_t>(std::get<float>(b));
+
         return a == b;
     }
 };

@@ -11,7 +11,9 @@ struct Identity {
     std::uint64_t connection = 0, account = 0;
     bool operator==(const Identity&) const = default;
 };
+
 enum class State { Loading, Ready, Failed };
+
 struct Cookie {
     Definition definition;
     State state = State::Loading;
@@ -32,8 +34,16 @@ public:
     Service& operator=(const Service&) = delete;
     void Pump();
     void Sync(const std::vector<Identity>& players);
-    bool Ready() const { Thread(); return catalog_state_ == State::Ready; }
-    const std::string& ErrorText() const { Thread(); return catalog_error_; }
+    bool Ready() const {
+        Thread();
+        return catalog_state_ == State::Ready;
+    }
+
+    const std::string& ErrorText() const {
+        Thread();
+        return catalog_error_;
+    }
+
     std::shared_ptr<Cookie> Register(const Definition& cookie);
     std::shared_ptr<Cookie> Find(const std::string& name) const;
     std::vector<Definition> UserCookies() const;
@@ -51,7 +61,11 @@ public:
     void RetryCatalog();
     void RetryWrites();
     bool CanStop();
-    std::size_t Pending() const { Thread(); return queue_.Pending(); }
+    std::size_t Pending() const {
+        Thread();
+        return queue_.Pending();
+    }
+
 private:
     struct Account {
         State state = State::Loading;
@@ -60,7 +74,11 @@ private:
         bool loading = false, saving = false, write_failed = false;
         std::string error, write_error;
     };
-    struct Task { std::unique_ptr<WorkQueue::Ticket> ticket; bool done = false; };
+
+    struct Task {
+        std::unique_ptr<WorkQueue::Ticket> ticket;
+        bool done = false;
+    };
     const std::thread::id owner_ = std::this_thread::get_id();
     StorageFactory storage_;
     State catalog_state_ = State::Loading;
@@ -77,6 +95,7 @@ private:
     void Save(std::uint64_t id, const std::shared_ptr<Account>& account);
     void Write(std::uint64_t id, const std::shared_ptr<Account>& account, const std::shared_ptr<Cookie>& cookie,
         const std::string& text, std::int64_t now);
+
     void Evict();
     void Thread() const;
     void LoadCatalog();

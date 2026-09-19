@@ -26,6 +26,7 @@ native TopMenuObject TopMenu_AddCategory(TopMenu menu, const char[] key, const c
 // temporarily coexist, with the newest running registration selected.
 native TopMenuObject TopMenu_AddItem(TopMenu menu, const char[] category, const char[] key,
     const char[] label, TopMenuHandler callback, const char[] permission = "", int order = 0, int data = 0);
+
 native bool TopMenu_Remove(TopMenuObject entry);
 native bool TopMenu_SetLabel(TopMenuObject entry, const char[] label);
 native bool TopMenu_SetOrder(TopMenuObject entry, int order);

@@ -11,6 +11,7 @@ enum GeoField {
     Geo_ContinentCode, Geo_ContinentName, Geo_RegionCode, Geo_RegionName,
     Geo_City, Geo_PostalCode, Geo_TimeZone, Geo_Organization
 }
+
 enum GeoNumber { Geo_Latitude, Geo_Longitude, Geo_AccuracyRadius }
 enum GeoDistanceUnit { Geo_Kilometers, Geo_Miles }
 typedef GeoCallback = function void(GeoDatabase database, any data, const char[] error);

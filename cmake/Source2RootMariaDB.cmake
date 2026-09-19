@@ -6,13 +6,16 @@ function(sr_mariadb_dependency)
     set(SR_MARIADB_WITH_EXTERNAL_ZLIB OFF)
     set(SR_MARIADB_WITH_SSL ON)
     set(SR_MARIADB_DEFAULT_SSL_VERIFY_SERVER_CERT ON)
+
     foreach(plugin DIALOG PARSEC AUTH_GSSAPI_CLIENT MYSQL_OLD_PASSWORD MYSQL_CLEAR_PASSWORD REMOTE_IO REPLICATION)
         set(CLIENT_PLUGIN_${plugin} OFF)
     endforeach()
+
     foreach(plugin MYSQL_NATIVE_PASSWORD CACHING_SHA2_PASSWORD SHA256_PASSWORD CLIENT_ED25519
                    PVIO_SOCKET PVIO_NPIPE PVIO_SHMEM)
         set(CLIENT_PLUGIN_${plugin} STATIC)
     endforeach()
+
     file(READ "${CMAKE_SOURCE_DIR}/dependencies.lock.json" lock)
     string(JSON url GET "${lock}" mariadb_connector_c url)
     string(JSON hash GET "${lock}" mariadb_connector_c sha256)
@@ -27,9 +30,11 @@ function(sr_mariadb_dependency)
     execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/cmake/prepare_mariadb.py"
         "${sr_mariadb_SOURCE_DIR}" "${SR_MARIADB_EFFECTIVE_SOURCE}" COMMAND_ERROR_IS_FATAL ANY)
     add_subdirectory("${SR_MARIADB_EFFECTIVE_SOURCE}" "${sr_mariadb_BINARY_DIR}")
+
     if(WIN32)
         target_compile_definitions(mariadb_obj PRIVATE WIN32_LEAN_AND_MEAN NOGDI)
     endif()
+
     set_target_properties(libmariadb PROPERTIES OUTPUT_NAME "libsource2root_mariadb")
     target_include_directories(libmariadb INTERFACE "${SR_MARIADB_EFFECTIVE_SOURCE}/include" "${sr_mariadb_BINARY_DIR}/include")
     set(SR_MARIADB_EFFECTIVE_SOURCE "${SR_MARIADB_EFFECTIVE_SOURCE}" PARENT_SCOPE)

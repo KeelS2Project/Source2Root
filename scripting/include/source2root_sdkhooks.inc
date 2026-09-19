@@ -40,6 +40,7 @@ typedef SDKHookCallback = function SDKHookAction(SDKHookFrame frame, SDKHookPhas
 // profiles/signatures and pointee contracts must match the running game binary.
 native SDKHook SDKHook_Add(int entityReference, const char[] target, SDKHookPhase phases,
     SDKHookCallback callback, int priority = 0, int data = 0);
+
 native bool SDKHook_Close(SDKHook hook);
 native bool SDKHook_Enable(SDKHook hook, bool enabled);
 native bool SDKHook_IsActive(SDKHook hook);

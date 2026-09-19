@@ -21,25 +21,37 @@ native bool ShowMenu(Menu menu, Player target, int timeoutMilliseconds = 15000);
 
 public bool OnPluginStart()
 {
-    if (!CancelTimer(CreateTimer(250, Expired))) return false;
+    if (!CancelTimer(CreateTimer(250, Expired)))
+        return false;
+
     return RegisterCommand("sr_legacy_steam", "", Read)
         && RegisterCommand("sr_legacy_activity", "", Activity)
         && RegisterCommand("sr_legacy_menu", "", Open);
 }
-public void Activity(Player caller, const char[] arguments) { ShowActivity(caller, "used older activity bytecode"); }
+
+public
+void Activity(Player caller, const char[] arguments)
+{
+    ShowActivity(caller, "used older activity bytecode");
+}
+
 public void Open(Player caller, const char[] arguments)
 {
     Menu menu = CreateMenu("Older menu bytecode", "", Selected);
     AddMenuItem(menu, "Select");
     ShowMenu(menu, caller);
 }
+
 public void Selected(Player caller, int item)
 {
-    if (item == 0) ReplyToCommand(caller, "legacy index=0");
+    if (item == 0)
+        ReplyToCommand(caller, "legacy index=0");
 }
 
 public void Read(Player caller, const char[] arguments)
 {
     char identity[24];
-    if (GetPlayerSteamID(caller, identity, sizeof(identity))) ReplyToCommand(caller, identity);
+
+    if (GetPlayerSteamID(caller, identity, sizeof(identity)))
+        ReplyToCommand(caller, identity);
 }

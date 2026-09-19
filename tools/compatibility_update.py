@@ -48,24 +48,30 @@ def decode(raw):
     require(len(raw) <= MANIFEST_LIMIT, 'JSON exceeds the size limit')
     def pairs(items):
         result = {}
+
         for key, value in items:
             require(key not in result, 'Duplicate JSON key')
             result[key] = value
+
         return result
     def constant(value):
         raise UpdateError('Nonfinite JSON number')
+
     try:
         result = json.loads(raw.decode('utf-8'), object_pairs_hook=pairs, parse_constant=constant)
         pending = [(result, 0)]
+
         while pending:
             value, depth = pending.pop()
             require(depth <= 32, 'JSON is too deeply nested')
+
             if isinstance(value, dict):
                 pending.extend((item, depth + 1) for item in value.values())
             elif isinstance(value, list):
                 pending.extend((item, depth + 1) for item in value)
             elif isinstance(value, float):
                 require(math.isfinite(value), 'Nonfinite JSON number')
+
         return result
     except (ValueError, UnicodeError, RecursionError) as error:
         raise UpdateError('Invalid UTF-8 JSON') from error
@@ -96,16 +102,19 @@ def filename(value):
 def no_link(path):
     require(not path.is_symlink() and not getattr(path, 'is_junction', lambda: False)(),
             'Links are not allowed in the snapshot store')
+
     try:
         attributes = getattr(path.lstat(), 'st_file_attributes', 0)
     except FileNotFoundError:
         return
+
     require(not attributes & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0), 'Reparse points are not allowed in the snapshot store')
 
 
 def read_file(path, limit=MANIFEST_LIMIT):
     no_link(path)
     require(stat.S_ISREG(path.stat().st_mode), 'Expected a regular file')
+
     with path.open('rb') as stream:
         info = os.fstat(stream.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, 'Expected a regular file without hard links')
@@ -118,6 +127,7 @@ def read_file(path, limit=MANIFEST_LIMIT):
 def timestamp(value):
     require(isinstance(value, str) and re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', value),
             'Timestamp must use UTC YYYY-MM-DDTHH:MM:SSZ')
+
     try:
         return datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
     except ValueError as error:
@@ -133,21 +143,27 @@ def configuration(path):
     url = urllib.parse.urlsplit(data['url'])
     require(url.scheme == 'https' and url.hostname and not url.username and not url.password
             and not url.fragment and not url.query, 'Update source requires HTTPS without credentials, query or fragment')
+
     try:
         url.port
     except ValueError as error:
         raise UpdateError('Invalid update port') from error
+
     require(data['product'] in ('KeelS2', 'Source2Root') and data['game'] == 'cs2'
             and data['platform'] in ('linuxsteamrt64', 'win64'), 'Unsupported product, game or platform')
     require(isinstance(data['files'], list) and 1 <= len(data['files']) <= 32, 'Configure 1..32 data filenames')
+
     for name in data['files']:
         filename(name)
+
     require(len(set(data['files'])) == len(data['files']), 'Duplicate allowed filename')
     integer(data['minimum_sequence'])
     data['timeout'] = integer(data.get('timeout', 15), 1, 60)
+
     if 'ca_file' in data:
         require(isinstance(data['ca_file'], str) and data['ca_file'], 'Invalid CA file')
         data['ca_file'] = str((path.parent / data['ca_file']).resolve(strict=True))
+
     return data
 
 
@@ -171,25 +187,33 @@ def fetch(config):
                                         urllib.request.HTTPSHandler(context=context))
     request = urllib.request.Request(config['url'], headers={'Accept': 'application/json', 'Accept-Encoding': 'identity'})
     deadline = time.monotonic() + config['timeout']
+
     try:
         response = opener.open(request, timeout=config['timeout'])
     except urllib.error.HTTPError as error:
         error.close()
         raise UpdateError('Update source returned HTTP ' + str(error.code)) from error
+
     with response:
         require(response.status == 200 and response.url == config['url'], 'Unexpected update response')
         require(response.headers.get('Content-Encoding', 'identity').lower() == 'identity', 'Compressed manifests are not accepted')
         length = response.headers.get('Content-Length')
+
         if length is not None:
             require(length.isascii() and length.isdecimal() and int(length) <= MANIFEST_LIMIT, 'Invalid manifest length')
+
         result = bytearray()
+
         while True:
             require(time.monotonic() < deadline, 'Update response exceeded its deadline')
             chunk = response.read1(min(16384, MANIFEST_LIMIT + 1 - len(result)))
+
             if not chunk:
                 break
+
             result.extend(chunk)
             require(len(result) <= MANIFEST_LIMIT, 'Manifest exceeds 1 MiB')
+
         require(length is None or len(result) == int(length), 'Incomplete manifest response')
         return bytes(result)
 
@@ -198,39 +222,49 @@ def manifest(raw, config, fresh=False):
     value = decode(raw)
     keys(value, ('schema', 'product', 'game', 'platform', 'sequence', 'version', 'issued_at', 'expires_at', 'files'))
     require(type(value['schema']) is int and value['schema'] == 1, 'Unsupported manifest schema')
+
     for key in ('product', 'game', 'platform'):
         require(value[key] == config[key], 'Manifest does not match the configured ' + key)
+
     integer(value['sequence'], config['minimum_sequence'] if fresh else 1)
     require(isinstance(value['version'], str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', value['version']), 'Invalid version label')
     issued, expires = timestamp(value['issued_at']), timestamp(value['expires_at'])
     require(issued < expires <= issued + timedelta(days=30), 'Manifest validity must be at most 30 days')
+
     if fresh:
         now = datetime.now(timezone.utc)
         require(issued <= now + timedelta(minutes=5) and now < expires, 'Manifest has expired or is not yet valid')
+
     require(isinstance(value['files'], list) and 1 <= len(value['files']) <= 32, 'Manifest needs 1..32 files')
     names, total = set(), 0
+
     for entry in value['files']:
         keys(entry, ('name', 'sha256', 'content'))
         name = filename(entry['name'])
         require(name in config['files'] and name not in names, 'Unexpected or duplicate data filename')
         names.add(name)
         require(isinstance(entry['content'], str) and '\0' not in entry['content'], 'Data must be NUL-free UTF-8 text')
+
         try:
             content = entry['content'].encode('utf-8')
         except UnicodeError as error:
             raise UpdateError('Invalid data encoding') from error
+
         total += len(content)
         require(0 < len(content) <= FILE_LIMIT and total <= DATA_LIMIT, 'Data exceeds snapshot limits')
         require(sha256(content) == digest(entry['sha256']), 'Data hash mismatch')
+
         if name.endswith('.json'):
             require(isinstance(decode(content), dict), 'JSON data must contain an object')
         else:
             rows = entry['content'].splitlines()
             require(rows and rows[0] == 'keels2-compatibility-profile\t1', 'TSV data must be a Keel compatibility profile')
+
             for field, expected in (('status', 'candidate-untrusted'), ('review', 'required'),
                                     ('game', config['game']), ('platform', config['platform'])):
                 matches = [row.split('\t') for row in rows[1:] if row.split('\t')[0] == field]
                 require(matches == [[field, expected]], 'Profile trust or target does not match the candidate policy')
+
     require(names == set(config['files']), 'Manifest must contain the complete configured file set')
     return value
 
@@ -238,6 +272,7 @@ def manifest(raw, config, fresh=False):
 def sync_directory(path):
     if os.name != 'nt':
         descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+
         try:
             os.fsync(descriptor)
         finally:
@@ -254,8 +289,10 @@ def write_new(path, raw):
 class Store:
     def __init__(self, path, config):
         self.path, self.config = Path(path).absolute(), config
+
         for parent in [*reversed(self.path.parents), self.path]:
             no_link(parent)
+
         self.path.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.releases = self.path / 'releases'
         no_link(self.releases)
@@ -264,35 +301,44 @@ class Store:
     @contextmanager
     def locked(self):
         lock = self.path / 'update.lock'
+
         try:
             descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError as error:
             raise UpdateError('Snapshot store is locked; finish the other updater or inspect a stale lock') from error
+
         try:
             with os.fdopen(descriptor, 'w') as stream:
                 stream.write(str(os.getpid()) + '\n')
+
             yield
         finally:
             lock.unlink()
 
     def state(self):
         path = self.path / 'state.json'
+
         if not path.exists() and not path.is_symlink():
             require(not any(self.releases.iterdir()), 'Snapshot index is missing; restore the index before updating')
             return {'schema': 1, 'source': identity(self.config), 'highest': 0, 'selected': None, 'previous': None, 'releases': {}}
+
         state = decode(read_file(path, 32 * 1024))
         keys(state, ('schema', 'source', 'highest', 'selected', 'previous', 'releases'))
         require(type(state['schema']) is int and state['schema'] == 1 and state['source'] == identity(self.config), 'Store belongs to another source or trust policy')
         integer(state['highest'], 0)
         require(isinstance(state['releases'], dict) and len(state['releases']) <= RELEASE_LIMIT, 'Invalid snapshot index')
+
         for sequence, value in state['releases'].items():
             require(re.fullmatch('[1-9][0-9]{0,18}', sequence), 'Invalid stored sequence')
             integer(int(sequence))
             keys(value, ('sha256', 'version'))
             digest(value['sha256'])
+
         require(state['highest'] == max((int(n) for n in state['releases']), default=0), 'Invalid sequence history')
+
         for field in ('selected', 'previous'):
             require(state[field] is None or (type(state[field]) is int and str(state[field]) in state['releases']), 'Invalid snapshot selection')
+
         return state
 
     def save(self, state):
@@ -300,9 +346,11 @@ class Store:
         no_link(target)
         fd, name = tempfile.mkstemp(prefix='.state-', dir=self.path)
         temporary = Path(name)
+
         try:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(encoded(state)); stream.flush(); os.fsync(stream.fileno())
+
             os.replace(temporary, target)
             sync_directory(self.path)
         finally:
@@ -319,8 +367,10 @@ class Store:
         no_link(data)
         require({p.name for p in directory.iterdir()} == {'manifest.json', 'data'}, 'Unexpected snapshot files')
         require({p.name for p in data.iterdir()} == set(self.config['files']), 'Snapshot data set changed')
+
         for entry in value['files']:
             require(read_file(data / entry['name'], FILE_LIMIT) == entry['content'].encode('utf-8'), 'Stored data differs from its manifest')
+
         return value
 
     def stage(self, raw):
@@ -329,31 +379,40 @@ class Store:
         sequence, key = value['sequence'], str(value['sequence'])
         record = {'sha256': sha256(raw), 'version': value['version']}
         require(sequence >= state['highest'], 'Manifest sequence is older than the highest staged version')
+
         if key in state['releases']:
             require(record == state['releases'][key], 'The source changed an existing sequence')
             self.verify(sequence, record)
             return {'status': 'unchanged', 'sequence': sequence, **record}
+
         require(len(state['releases']) < RELEASE_LIMIT, 'Snapshot limit reached; prune old snapshots explicitly')
+
         if not (self.path / 'state.json').exists():
             self.save(state)
+
         directory = self.releases / key
+
         if directory.exists() or directory.is_symlink():
             # Recover only a complete matching snapshot from a prior state-write failure.
             self.verify(sequence, record)
         else:
             require(len(list(self.releases.iterdir())) < RELEASE_LIMIT, 'Snapshot storage limit reached; inspect incomplete staging directories')
             temporary = Path(tempfile.mkdtemp(prefix='.staging-', dir=self.releases))
+
             try:
                 (temporary / 'data').mkdir()
                 write_new(temporary / 'manifest.json', raw)
+
                 for entry in value['files']:
                     write_new(temporary / 'data' / entry['name'], entry['content'].encode('utf-8'))
+
                 sync_directory(temporary / 'data'); sync_directory(temporary)
                 temporary.rename(directory)
                 sync_directory(self.releases)
             finally:
                 if temporary.exists():
                     shutil.rmtree(temporary)
+
         state['highest'] = sequence
         state['releases'][key] = record
         self.save(state)
@@ -367,9 +426,11 @@ class Store:
         record = state['releases'][str(sequence)]
         require(digest(reviewed_hash) == record['sha256'], 'Review hash does not match the staged snapshot')
         self.verify(sequence, record)
+
         if state['selected'] != sequence:
             state['previous'], state['selected'] = state['selected'], sequence
             self.save(state)
+
         return {'selected': sequence, **record, 'activation': 'Snapshot selection only; no live installation or compiled profile change'}
 
     def rollback(self):
@@ -384,8 +445,10 @@ class Store:
 
     def status(self):
         state = self.state()
+
         for sequence, record in state['releases'].items():
             self.verify(int(sequence), record)
+
         return state
 
     def export(self, destination):
@@ -396,18 +459,23 @@ class Store:
         record = state['releases'][str(sequence)]
         value = self.verify(sequence, record)
         destination = Path(destination).absolute()
+
         for parent in [*destination.parents, destination]:
             no_link(parent)
+
         require(not destination.is_relative_to(self.path) and not self.path.is_relative_to(destination), 'Export must be outside the snapshot store')
         destination.mkdir(mode=0o700)
+
         try:
             for entry in value['files']:
                 write_new(destination / entry['name'], entry['content'].encode('utf-8'))
+
             write_new(destination / 'snapshot.json', encoded({'sequence': sequence, **record, 'source': state['source'], 'review': 'required', 'activation': 'Not installed'}))
             sync_directory(destination)
         except BaseException:
             shutil.rmtree(destination)
             raise
+
         return {'directory': str(destination), 'sequence': sequence, 'activation': 'Export only; install through the product-specific review process'}
 
     def prune(self, sequence):
@@ -439,9 +507,11 @@ def main(argv=None):
     prune = commands.add_parser('prune', help='Remove one unselected old snapshot')
     prune.add_argument('sequence', type=int)
     args = parser.parse_args(argv)
+
     try:
         config = configuration(args.config)
         store = Store(args.store, config)
+
         with store.locked():
             if args.command == 'check':
                 store.state()  # Refuse a changed trust policy before making a request.
@@ -454,6 +524,7 @@ def main(argv=None):
                 result = store.prune(integer(args.sequence))
             else:
                 result = getattr(store, args.command)()
+
         print(json.dumps(result, indent=2))
         return 0
     except (UpdateError, OSError, ValueError, http.client.HTTPException) as error:

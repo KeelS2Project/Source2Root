@@ -1,4 +1,5 @@
 option(SR_DATABASE_EXTENSION "Build the database extension" ON)
+
 if(SR_DATABASE_EXTENSION)
     enable_language(C)
     include(FetchContent)
@@ -27,6 +28,7 @@ if(SR_DATABASE_EXTENSION)
     find_package(Threads REQUIRED)
     target_link_libraries(source2root_database PRIVATE sr_database KeelS2::SDK KeelS2::SourceSDK Threads::Threads)
     option(SR_MYSQL_DRIVER "Build the MySQL/MariaDB database driver" ON)
+
     if(SR_MYSQL_DRIVER)
         include(cmake/Source2RootMariaDB.cmake)
         sr_mariadb_dependency()
@@ -50,6 +52,7 @@ if(SR_DATABASE_EXTENSION)
         set_property(TARGET source2root_database APPEND PROPERTY BUILD_RPATH "$ORIGIN")
         set_property(TARGET source2root_database APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
     endif()
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(source2root_database PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
         target_link_options(source2root_clientprefs PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")

@@ -11,6 +11,7 @@ def main():
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
     validator = Path(sys.argv[2]).resolve()
+
     with tempfile.TemporaryDirectory(prefix="source2root-migration-") as directory:
         root = Path(directory)
         source, bans = root / "admins.json", root / "bans.json"
@@ -37,11 +38,13 @@ def main():
         assert report["legacy_permission_mapping"]["map"] == "admin.changemap"
         assert subprocess.check_output([validator, "--validate", output / "configs", "76561197960265851"], text=True).splitlines() == ["Root", "1000", "1", "1"]
         assert subprocess.check_output([validator, "--validate", output / "configs", "[U:1:124]"], text=True).splitlines() == ["Senior Moderator", "25", "1", "0"]
+
         try:
             migration.migrate(source, output, bans)
             raise AssertionError("existing destination was overwritten")
         except FileExistsError:
             pass
+
         assert (output / "originals/admins.json").read_bytes() == before
         foundation = {"schema": 1, "admins": [{"identity": "[U:1:123]", "permissions": ["admin.kick", "demo.status"]},
                                              {"identity": "[U:1:124]", "permissions": ["demo.status", "admin.kick"]}]}
@@ -50,6 +53,7 @@ def main():
         report = migration.migrate(source, converted)
         assert report["group_count"] == 1 and report["administrators"][0]["immunity"] == 0
         assert subprocess.check_output([validator, "--validate", converted / "configs", "[U:1:123]"], text=True).splitlines()[1:] == ["0", "1", "0"]
+
         for suffix, settings in (("true", {"announce_actions": True, "allowed_maps": []}), ("default", {})):
             native = {k: v for k, v in original.items() if k not in ("announce_actions", "allowed_maps")}
             native.update(settings)
@@ -57,13 +61,16 @@ def main():
             files, report = migration.prepare(source)
             assert report["converted_settings"] == {"sr_show_activity": 13, "allowed_maps": []}
             assert files["configs/allowed_maps.txt"] == b"\n"
+
         for invalid in ({"announce_actions": 1}, {"allowed_maps": ["de_dust2;quit"]}, {"allowed_maps": ["x"] * 1025}):
             source.write_text(json.dumps(dict(original, **invalid)))
+
             try:
                 migration.prepare(source)
                 raise AssertionError("invalid legacy setting accepted")
             except ValueError:
                 pass
+
         full_maps = ["m" * 60 + str(i) for i in range(1024)]
         source.write_text(json.dumps(dict(original, allowed_maps=full_maps)))
         files, report = migration.prepare(source)
@@ -71,21 +78,26 @@ def main():
         assert report["converted_settings"]["allowed_maps"] == full_maps
         duplicate = dict(original)
         duplicate["admins"] = [original["admins"][0], {"steamid": "[U:1:123]", "group": "Root"}]
+
         for index, value in enumerate([duplicate, {"schema": True, "admins": []}, {"schema": 1, "admins": [{}]},
                                        {"schema": 1, "admins": [{"identity": "[U:1:0]", "permissions": []}]}]):
             source.write_text(json.dumps(value))
             dest = root / f"invalid-{index}"
+
             try:
                 migration.migrate(source, dest)
                 raise AssertionError("invalid source was accepted")
             except ValueError:
                 assert not dest.exists()
+
         source.write_text('{"schema":1,"schema":1,"admins":[]}')
+
         try:
             migration.prepare(source)
             raise AssertionError("duplicate JSON keys were accepted")
         except ValueError:
             pass
+
     print("Migration preserves identities, permissions, immunity, raw originals and bans; native parser accepts converted files.")
 
 

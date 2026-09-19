@@ -28,11 +28,12 @@ public:
     Session& operator=(const Session&) = delete;
     db::QueryResult Execute(const db::QueryInput& input);
     void Commit();
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
-SR_MYSQL_API db::QueryResult Query(const db::Settings& settings, const db::QueryInput& input, const std::atomic_bool& canceled);
-
+SR_MYSQL_API db::QueryResult
+Query(const db::Settings& settings, const db::QueryInput& input, const std::atomic_bool& canceled);
 }

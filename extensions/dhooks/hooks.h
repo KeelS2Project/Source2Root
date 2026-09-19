@@ -13,14 +13,27 @@
 
 namespace source2root::sdkhooks { class Service; }
 namespace source2root::dhooks {
-class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
+class Error : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 enum class BufferKind { string, int32, vector3 };
+
 struct BufferSpec {
     unsigned argument = 0, capacity = 0, length_argument = 0;
     BufferKind kind = BufferKind::string;
 };
-struct EntitySpec { unsigned argument = 0; std::string class_name; };
-struct EntityHookPolicy { std::string kind, class_name, block; };
+
+struct EntitySpec {
+    unsigned argument = 0;
+    std::string class_name;
+};
+
+struct EntityHookPolicy {
+    std::string kind, class_name, block;
+};
+
 struct Definition {
     unsigned source = 0, result = KH_VALUE_VOID;
     bool method = false, allow_calls = false;
@@ -34,10 +47,15 @@ struct Definition {
 };
 Definition ReadDefinition(const std::filesystem::path& file, const std::string& name, const std::string& script);
 void Validate(const Definition& definition);
+
 class Service;
+
 class Call;
+
 struct TargetData;
+
 struct Registration;
+
 struct EntityLease {
     EntityLease() = default;
     EntityLease(const EntityLease&) = delete;
@@ -53,9 +71,18 @@ struct EntityLease {
 // back, after a successful script callback with a valid phase/action pair.
 class Frame final {
 public:
-    unsigned Phase() const { return phase_; }
-    unsigned Flags() const { return flags_; }
-    unsigned Count() const { return static_cast<unsigned>(arguments_.size()); }
+    unsigned Phase() const {
+        return phase_;
+    }
+
+    unsigned Flags() const {
+        return flags_;
+    }
+
+    unsigned Count() const {
+        return static_cast<unsigned>(arguments_.size());
+    }
+
     unsigned Type(unsigned slot) const;
     std::int32_t Integer(unsigned slot) const;
     std::string IntegerText(unsigned slot) const;
@@ -68,6 +95,7 @@ public:
     void SetNumberText(unsigned slot, const std::string& value);
     void SetNull(unsigned slot);
     void Copy(unsigned destination, unsigned source);
+
 private:
     friend class Service;
     friend class Call;
@@ -89,6 +117,7 @@ public:
     ~Target() = default;
     Target(const Target&) = delete;
     Target& operator=(const Target&) = delete;
+
 private:
     friend class Service;
     Target(std::shared_ptr<Service> service, std::shared_ptr<TargetData> data, Definition definition);
@@ -124,19 +153,24 @@ public:
     std::array<float, 3> Vector(unsigned slot) const;
     void Reset();
     void Execute(unsigned flags);
+
 private:
     friend class Service;
     Call(std::shared_ptr<Service> service, std::shared_ptr<TargetData> target, const Definition& definition);
     template<class Function> void Edit(unsigned slot, Function function);
+
     struct Entity;
     Entity& WritableEntity(unsigned slot);
+
     struct Buffer;
     Buffer& WritableBuffer(unsigned slot, BufferKind kind);
     const Buffer& ReadBuffer(unsigned slot, BufferKind kind) const;
     void CommitBuffer(Buffer& buffer, Buffer value);
+
     struct State;
     std::shared_ptr<State> state_;
 };
+
 class Hook final {
 public:
     ~Hook();
@@ -145,6 +179,7 @@ public:
     void Close();
     void Enable(bool enabled);
     bool Active() const;
+
 private:
     friend class Service;
     Hook(std::shared_ptr<Service> service, std::shared_ptr<Registration> registration);
@@ -154,10 +189,12 @@ private:
 // Return -1 to discard all edits, -2 to also retire the hook. Callback
 // providers retain their own VM tokens and cancel them in the retire function.
 using Callback = std::function<int(Frame&)>;
+
 class Service final : public std::enable_shared_from_this<Service> {
 public:
     Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime,
         const KeelCallApi* calls = nullptr);
+
     void EntityServices(const KeelEntityAccessApi& access, const KeelEntitiesApi& entities, const KeelPlayersApi& players);
     std::unique_ptr<Target> Open(const Definition& definition);
     std::unique_ptr<Call> Prepare(const Target& target);
@@ -166,9 +203,18 @@ public:
     // Retry native removal/restoration failures while retaining callback data.
     // Unload must remain blocked until Empty(), including after script cleanup.
     void Collect();
-    bool Empty() const { return registrations_.empty() && targets_.empty() && !entity_count_; }
-    unsigned TargetCount() const { return static_cast<unsigned>(targets_.size()); }
-    unsigned HookCount() const { return static_cast<unsigned>(registrations_.size()); }
+    bool Empty() const {
+        return registrations_.empty() && targets_.empty() && !entity_count_;
+    }
+
+    unsigned TargetCount() const {
+        return static_cast<unsigned>(targets_.size());
+    }
+
+    unsigned HookCount() const {
+        return static_cast<unsigned>(registrations_.size());
+    }
+
 private:
     friend class Hook;
     friend class Call;
@@ -179,8 +225,10 @@ private:
     void InvokeEntities(const TargetData& target, const std::vector<KeelHookValue>& arguments,
         const std::vector<BufferSpec>& bounds, const std::vector<KeelEntityAccessSpec>& entities,
         const std::vector<unsigned>& slots, KeelHookValue& result);
+
     void Invoke(const TargetData& target, unsigned flags, const std::vector<KeelHookValue>& arguments,
         const std::vector<BufferSpec>& bounds, KeelHookValue& result);
+
     void CheckBufferEdits(const KeelHookFrame& before, const Frame& after) const;
     void Thread() const;
     void Close(Registration& registration) noexcept;
@@ -193,6 +241,7 @@ private:
     KeelEntitiesApi entities_{};
     KeelPlayersApi players_{};
     unsigned entity_count_ = 0;
+
     struct BufferScope {
         KeelHookTargetHandle target;
         const std::vector<KeelHookValue>* arguments;

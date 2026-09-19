@@ -1,4 +1,5 @@
 option(SR_POSTGRESQL_DRIVER "Build pinned PostgreSQL database driver" ON)
+
 if(SR_DATABASE_EXTENSION AND SR_POSTGRESQL_DRIVER)
     include(FetchContent)
     include(ExternalProject)
@@ -10,25 +11,31 @@ if(SR_DATABASE_EXTENSION AND SR_POSTGRESQL_DRIVER)
     find_program(SR_PG_BISON NAMES bison win_bison REQUIRED)
     find_program(SR_PG_PERL NAMES perl REQUIRED)
     file(READ "${CMAKE_SOURCE_DIR}/dependencies.lock.json" SR_PG_LOCK)
+
     foreach(dependency postgresql meson)
         string(JSON url GET "${SR_PG_LOCK}" "${dependency}" url)
         string(JSON hash GET "${SR_PG_LOCK}" "${dependency}" sha256)
+
         if(dependency STREQUAL "meson")
             FetchContent_Declare(sr_meson URL "${url}" URL_HASH "SHA256=${hash}" DOWNLOAD_NAME meson.zip DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
         else()
             FetchContent_Declare(sr_postgresql URL "${url}" URL_HASH "SHA256=${hash}" DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
         endif()
     endforeach()
+
     FetchContent_MakeAvailable(sr_meson sr_postgresql)
     set(SR_PG_EFFECTIVE_SOURCE "${CMAKE_BINARY_DIR}/_deps/sr_postgresql-unloadable-src")
     set(SR_PG_ARGS --flex "${SR_PG_FLEX}" --bison "${SR_PG_BISON}" --perl "${SR_PG_PERL}")
+
     if(SR_SANITIZERS AND NOT MSVC)
         list(APPEND SR_PG_ARGS --sanitize)
     endif()
+
     if(WIN32)
         get_filename_component(SR_PG_OPENSSL_PREFIX "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
         list(APPEND SR_PG_ARGS --windows --openssl-prefix "${SR_PG_OPENSSL_PREFIX}")
     endif()
+
     # PostgreSQL explicitly names its Meson static archives .a, including MSVC.
     set(SR_PQ_TARGET "src/interfaces/libpq/libpq.a")
     set(SR_PG_COMMON_TARGET "src/common/libpgcommon_shlib.a")
@@ -56,9 +63,11 @@ if(SR_DATABASE_EXTENSION AND SR_POSTGRESQL_DRIVER)
     set_target_properties(sr_libpq PROPERTIES IMPORTED_LOCATION "${SR_PQ_ARCHIVE}"
         INTERFACE_INCLUDE_DIRECTORIES "${sr_postgresql_SOURCE_DIR}/src/interfaces/libpq;${sr_postgresql_SOURCE_DIR}/src/include;${sr_postgresql_BINARY_DIR}/src/include"
         INTERFACE_LINK_LIBRARIES "${SR_PG_COMMON};${SR_PG_PORT};OpenSSL::SSL;OpenSSL::Crypto;Threads::Threads;${CMAKE_DL_LIBS}")
+
     if(WIN32)
         set_property(TARGET sr_libpq APPEND PROPERTY INTERFACE_LINK_LIBRARIES ws2_32 secur32 crypt32 bcrypt)
     endif()
+
     add_dependencies(sr_libpq sr_libpq_build)
     add_library(sr_postgresql STATIC extensions/postgresql/driver.cpp)
     target_include_directories(sr_postgresql PUBLIC extensions/postgresql)

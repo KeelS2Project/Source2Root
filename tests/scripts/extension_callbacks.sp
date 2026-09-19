@@ -13,16 +13,34 @@ public bool OnPluginStart()
         && CaptureCallback(Completed, 0);
 }
 
-public void Queue(Player caller, const char[] arguments) { CaptureCallback(Completed, 2); }
-public void Fault(Player caller, const char[] arguments) { CaptureCallback(Failed, 2); }
-public void Quota(Player caller, const char[] arguments) { CaptureCallback(Completed, 3); }
+public
+void Queue(Player caller, const char[] arguments)
+{
+    CaptureCallback(Completed, 2);
+}
+
+public
+void Fault(Player caller, const char[] arguments)
+{
+    CaptureCallback(Failed, 2);
+}
+
+public
+void Quota(Player caller, const char[] arguments)
+{
+    CaptureCallback(Completed, 3);
+}
 
 public void Completed(int value, const char[] text)
 {
-    if (value == 42 && text[0] == 'o' && text[1] == 'k') LogMessage("ASYNC_CALLBACK_OK");
+    if (value == 42 && text[0] == 'o' && text[1] == 'k')
+        LogMessage("ASYNC_CALLBACK_OK");
 }
+
 public void Failed(int value, const char[] text)
 {
     int result = 42 / value;
-    if (result) LogMessage(text);
+
+    if (result)
+        LogMessage(text);
 }

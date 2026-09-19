@@ -11,6 +11,7 @@ class GameHost;
 class Voice {
 public:
     explicit Voice(GameHost& host) : host_(host) {}
+
     bool Set(std::uint64_t owner, const Player& player, bool muted, std::string& error);
     bool Muted(const Player& player) const;
     bool Release(std::uint64_t owner, std::string& error);
@@ -19,6 +20,7 @@ public:
     bool Resume(std::string& error);
     KeelResult Filter(int receiver, int sender, bool& listening);
     void Disconnected(int slot, std::uint64_t connection);
+
 private:
     struct Pair {
         Player receiver, sender;

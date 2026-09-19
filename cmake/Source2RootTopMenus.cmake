@@ -1,4 +1,5 @@
 option(SR_TOPMENUS_EXTENSION "Build shared categorized plugin menus" ON)
+
 if(SR_TOPMENUS_EXTENSION)
     add_library(sr_topmenus STATIC extensions/topmenus/catalog.cpp)
     target_include_directories(sr_topmenus PUBLIC extensions/topmenus)
@@ -7,6 +8,7 @@ if(SR_TOPMENUS_EXTENSION)
     target_compile_definitions(source2root_topmenus PRIVATE KEELS2_PLUGIN_BUILD)
     target_include_directories(source2root_topmenus PRIVATE include)
     target_link_libraries(source2root_topmenus PRIVATE sr_topmenus KeelS2::SDK KeelS2::SourceSDK)
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(source2root_topmenus PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
     endif()

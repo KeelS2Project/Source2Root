@@ -12,6 +12,7 @@ enum SchemaType
     Schema_Int32, Schema_UInt32, Schema_Int64, Schema_UInt64,
     Schema_Float32, Schema_Float64, Schema_Bool, Schema_EntityHandle, Schema_Vector3
 }
+
 // Game-thread operations through Keel's entity/schema services. Availability,
 // field names and types depend on the active game adapter and compatibility
 // profile. No raw memory addresses or guessed offsets are exposed.
@@ -155,19 +156,27 @@ native bool Entity_GetInputCapabilities(int& directTypes, int& queuedTypes);
 // Errors after engine entry do not roll back effects. At most 8 active calls.
 native bool Entity_InputVoid(Entity entity, const char[] input, bool& invoked,
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputString(Entity entity, const char[] input, bool& invoked, const char[] value,
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputBool(Entity entity, const char[] input, bool& invoked, bool value,
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputInt(Entity entity, const char[] input, bool& invoked, int value,
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputFloat(Entity entity, const char[] input, bool& invoked, float value,
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputVector(Entity entity, const char[] input, bool& invoked, const float value[3],
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputAngles(Entity entity, const char[] input, bool& invoked, const float value[3],
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputColor(Entity entity, const char[] input, bool& invoked, const int value[4],
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);
+
 native bool Entity_InputEntity(Entity entity, const char[] input, bool& invoked, Entity value,
     Entity activator = NoEntity, Entity caller = NoEntity, bool queued = false, float delay = 0.0);

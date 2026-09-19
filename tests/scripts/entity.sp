@@ -8,6 +8,7 @@ public bool OnPluginStart()
 public void Health(Player player, const char[] arguments)
 {
     int health = 999;
+
     if (GetPlayerHealth(player, health))
         ReplyToCommand(player, health == 73 ? "entity health 73" : "unexpected entity health");
     else

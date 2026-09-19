@@ -10,6 +10,7 @@ public:
     explicit Statistics(std::shared_ptr<sdktools::Service> service);
     std::int32_t Get(const KeelPlayerConnection& player, Statistic statistic) const;
     void Set(const KeelPlayerConnection& player, Statistic statistic, std::int32_t value) const;
+
 private:
     std::shared_ptr<sdktools::Service> service_;
 };

@@ -10,9 +10,19 @@
 
 namespace source2root::http {
 inline constexpr unsigned BodyLimit = 1024 * 1024, HeaderLimit = 64 * 1024;
+
 enum class Method { Get, Head, Post, Put, Patch, Delete };
-class Error : public std::runtime_error { public: using std::runtime_error::runtime_error; };
-struct Part { std::string name, data, filename, content_type; std::filesystem::path source; };
+
+class Error : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+struct Part {
+    std::string name, data, filename, content_type;
+    std::filesystem::path source;
+};
+
 struct Request {
     std::string url;
     Method method = Method::Get;
@@ -23,6 +33,7 @@ struct Request {
     unsigned timeout_ms = 10000, response_limit = 256 * 1024, redirects = 3;
     void Validate() const;
 };
+
 struct Response {
     unsigned status = 0;
     std::string url, body;

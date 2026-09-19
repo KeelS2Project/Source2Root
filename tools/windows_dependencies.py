@@ -17,38 +17,50 @@ def main():
     parser.add_argument("--vcpkg-source", required=True, type=Path,
         help="Checkout at the locked vcpkg revision, or its packaged corresponding sources")
     args = parser.parse_args()
+
     if os.name != "nt":
         parser.error("Run this helper on Windows")
+
     lock = json.loads((ROOT / "dependencies.lock.json").read_text())
     recipe = args.vcpkg_source.resolve(strict=True)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+
     if (recipe / ".git").exists():
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=recipe, text=True).strip()
         dirty = subprocess.check_output(["git", "diff", "HEAD", "--name-only"], cwd=recipe, text=True).strip()
+
         if revision != lock["vcpkg"]["revision"] or dirty:
             raise RuntimeError("Use the clean vcpkg revision in dependencies.lock.json")
     else:
         manifest = json.loads((recipe.parent.parent / "extension-source-inputs.json").read_text())["vcpkg"]
+
         if manifest["upstream"]["revision"] != lock["vcpkg"]["revision"]:
             raise RuntimeError("Packaged vcpkg sources do not match the lock")
+
         for name, expected in manifest["files"].items():
             if hashlib.sha256((recipe / name).read_bytes()).hexdigest() != expected:
                 raise RuntimeError(f"Packaged vcpkg source changed: {name}")
+
     if not (recipe / "vcpkg.exe").is_file():
         subprocess.run(["cmd.exe", "/d", "/c", str(recipe / "bootstrap-vcpkg.bat"), "-disableMetrics"], check=True)
+
     triplet = lock["vcpkg"]["triplet"]
     overlays = output / "vcpkg-overlay-ports"
+
     for name in lock["vcpkg"]["ports"]:
         port = overlays / name
         shutil.copytree(recipe / "ports" / name, port, dirs_exist_ok=True)
         script = port / "portfile.cmake"
         content = script.read_text()
+
         if name == "openssl":
             if content.count("    PATCHES\n") != 1:
                 raise RuntimeError("Review the updated OpenSSL recipe before applying build metadata mapping")
+
             content = content.replace("    PATCHES\n", "    PATCHES\n        source2root-buildinfo.patch\n")
             shutil.copy2(ROOT / "cmake/openssl_buildinfo.patch", port / "source2root-buildinfo.patch")
+
         content += '\nfile(WRITE "$ENV{SR_WINDOWS_DEPENDENCY_ROOT}/' + name + '-source-path.txt" "${SOURCE_PATH}")\n'
         script.write_text(content)
     # Classic vcpkg install can retain an installed package when an overlay
@@ -72,12 +84,17 @@ def main():
     subprocess.run(command, env=env, check=True)
     prefix = installed / triplet
     values = {"OPENSSL_ROOT_DIR": prefix, "ZLIB_ROOT": prefix, "SR_VCPKG_SOURCE": recipe}
+
     for name in lock["vcpkg"]["ports"]:
         source = Path((output / (name + "-source-path.txt")).read_text()).resolve(strict=True)
+
         if not source.is_relative_to(output / "vcpkg-buildtrees" / name / "src"):
             raise RuntimeError(f"Unexpected {name} corresponding source path")
+
         values["SR_" + name.upper() + "_SOURCE"] = source
+
     perl = list((output / "vcpkg-downloads/tools/perl").glob("*/perl/bin/perl.exe"))
+
     if len(perl) == 1:
         values["SR_PG_PERL"] = perl[0]
     # FindOpenSSL uses legacy EAY cache entries on Windows. Changing only its

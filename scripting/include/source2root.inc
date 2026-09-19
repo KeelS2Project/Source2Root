@@ -76,13 +76,16 @@ native bool GetLastError(char[] output, int capacity);
 native bool GetDataPath(char[] output, int capacity);
 native Menu CreateMenu(const char[] title, const char[] permission, MenuCallback callback,
     MenuBackCallback back = INVALID_FUNCTION);
+
 native bool AddMenuItem(Menu menu, const char[] text, bool enabled = true, int value = -1);
 native bool ShowMenu(Menu menu, Player player, int timeoutMilliseconds = 20000);
 native bool CloseMenu(Menu menu);
 native ConVar CreateIntConVar(const char[] name, int defaultValue, const char[] description = "",
     int minimum = (-2147483647 - 1), int maximum = 2147483647);
+
 native ConVar CreateFloatConVar(const char[] name, float defaultValue, const char[] description = "",
     float minimum = -3.402823466e38, float maximum = 3.402823466e38);
+
 native ConVar CreateStringConVar(const char[] name, const char[] defaultValue, const char[] description = "");
 native bool GetConVarInt(ConVar convar, int& value);
 native bool GetConVarFloat(ConVar convar, float& value);

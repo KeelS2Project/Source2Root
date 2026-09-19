@@ -1,4 +1,5 @@
 option(SR_REGEX_EXTENSION "Build bounded PCRE2 regex extension" ON)
+
 if(SR_REGEX_EXTENSION)
     enable_language(C)
     include(FetchContent)
@@ -30,6 +31,7 @@ if(SR_REGEX_EXTENSION)
     target_compile_definitions(source2root_regex PRIVATE KEELS2_PLUGIN_BUILD)
     target_include_directories(source2root_regex PRIVATE include)
     target_link_libraries(source2root_regex PRIVATE sr_regex KeelS2::SDK KeelS2::SourceSDK)
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(source2root_regex PRIVATE "LINKER:--exclude-libs,ALL" "LINKER:-z,defs")
     endif()
