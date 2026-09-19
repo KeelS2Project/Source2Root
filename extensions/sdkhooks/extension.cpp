@@ -29,6 +29,15 @@ private:
         if (api->size != sizeof(T) || api->api_version != version) throw sdk::Error("Incompatible SDKHooks service.");
         return *api;
     }
+    const KeelEntityConstructionApi* OptionalConstruction() {
+        const void* raw{};
+        const auto result = HostContext().QueryService(KEELS2_ENTITY_CONSTRUCTION_SERVICE_NAME,1,&raw);
+        if (result == KEEL_RESULT_NOT_FOUND || result == KEEL_RESULT_UNSUPPORTED) return nullptr;
+        if (result != KEEL_RESULT_OK || !raw) throw sdk::Error("Pending entity service query failed.");
+        const auto* api = static_cast<const KeelEntityConstructionApi*>(raw);
+        if (api->size != sizeof(*api) || api->api_version != 1) throw sdk::Error("Incompatible pending entity service.");
+        return api;
+    }
     bool OnExtensionStart() override {
         service_ = std::make_shared<sdk::Service>(HostContext().PluginHandle(),
             Require<KeelHookApi>(KEELHOOK_SERVICE_NAME,KEELHOOK_API_VERSION),
@@ -36,7 +45,7 @@ private:
             Require<KeelEntitiesApi>(KEELS2_ENTITIES_SERVICE_NAME,KEELS2_ENTITIES_API_VERSION),
             Require<KeelEntityAccessApi>(KEELS2_ENTITY_ACCESS_SERVICE_NAME,KEELS2_ENTITY_ACCESS_API_VERSION),
             Require<KeelEntityCaptureApi>(KEELS2_ENTITY_CAPTURE_SERVICE_NAME,KEELS2_ENTITY_CAPTURE_API_VERSION),
-            Require<KeelEntityHookDataApi>(KEELS2_ENTITY_HOOK_DATA_SERVICE_NAME,KEELS2_ENTITY_HOOK_DATA_API_VERSION));
+            Require<KeelEntityHookDataApi>(KEELS2_ENTITY_HOOK_DATA_SERVICE_NAME,KEELS2_ENTITY_HOOK_DATA_API_VERSION), OptionalConstruction());
         return RegisterNative("SDKHook_Add",6,&SDKHooks::Add)
             && RegisterNative("SDKHook_Close",1,&SDKHooks::Close)
             && RegisterNative("SDKHook_Enable",2,&SDKHooks::Enable)

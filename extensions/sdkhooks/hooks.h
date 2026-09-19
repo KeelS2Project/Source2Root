@@ -1,6 +1,7 @@
 #pragma once
 #include "../dhooks/hooks.h"
 #include <keels2/entity_hook_data.h>
+#include <keels2/entity_construction.h>
 
 namespace source2root::sdkhooks {
 using Error = dhooks::Error;
@@ -46,7 +47,7 @@ class Service final : public std::enable_shared_from_this<Service> {
 public:
     Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime,
         const KeelEntitiesApi& entities, const KeelEntityAccessApi& access,
-        const KeelEntityCaptureApi& capture, const KeelEntityHookDataApi& data);
+        const KeelEntityCaptureApi& capture, const KeelEntityHookDataApi& data, const KeelEntityConstructionApi* construction = nullptr);
     std::unique_ptr<Hook> Attach(const dhooks::Definition& definition, std::uint32_t entity,
         unsigned phases, std::int32_t priority, Callback callback, std::function<void()> retire);
     void Collect(bool end_frame = false);
@@ -57,6 +58,8 @@ private:
     void Thread() const;
     std::shared_ptr<Lease> Acquire(std::uint32_t source);
     std::shared_ptr<Lease> Capture(const void* pointer);
+    KeelResult Describe(const Lease& lease, KeelEntityInfo& info) const;
+    KeelResult Visit(const Lease& lease, const char* name, KeelEntityAccessCallback callback, void* data) const;
     bool Valid(const Lease& lease) const;
     bool Matches(const State& state, const void* pointer) const;
     int Dispatch(State& state, dhooks::Frame& native);
@@ -67,6 +70,7 @@ private:
     KeelEntityAccessApi access_;
     KeelEntityCaptureApi capture_;
     KeelEntityHookDataApi data_;
+    KeelEntityConstructionApi construction_;
     std::shared_ptr<dhooks::Service> transport_;
     std::vector<std::weak_ptr<State>> states_;
     unsigned leases_ = 0, active_ = 0;

@@ -21,6 +21,10 @@ typedef SDKHookCallback = function SDKHookAction(SDKHookFrame frame, SDKHookPhas
 // entityReference is a full Source2 entity handle (for example from
 // Entity_SourceHandle), not an entity index or a SourcePawn resource handle.
 // Registration owns its identity and map epoch; deletion/reuse cannot retarget it.
+// With the optional construction service, a tracked pending creation can be
+// observed before DispatchSpawn. This lease never owns or cancels the entity.
+// Closing its pending owner invalidates the hook, even if an active spawn later
+// succeeds. A surviving observer becomes an ordinary live lease after spawn.
 // targets.json lives under configs/extensions/source2root.sdkhooks. It uses the
 // DHooks resolver catalog format plus sdkhook:{kind,class,block}. Each target
 // requires a plugin allowlist, method:true and block:"preserve_result" explicitly

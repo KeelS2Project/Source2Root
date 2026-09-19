@@ -2,6 +2,7 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <set>
 #include <thread>
 
 using namespace source2root::sdkhooks;
@@ -21,7 +22,9 @@ struct Host {
     std::uint64_t epoch = 1;
     int objects[2]{11,22}, component = 33;
     bool alive[2]{true,true}, canonical_component = true, fail_remove = false;
-    unsigned captures = 0, writes = 0;
+    unsigned captures = 0, writes = 0, observed = 0, pending_visits = 0;
+    bool pending = false, owner_closed = false;
+    std::set<KeelEntityHandle> observers;
     KeelDamageInfo damage{sizeof(damage),0,42.5f,0x80000040,-7,0x1008,UINT32_MAX,UINT32_MAX,{1,2,3},{4,5,6}};
     std::function<void()> write_lookup;
     Host() { active = this; }
@@ -41,16 +44,18 @@ struct Host {
     static KeelResult Enable(KeelPluginHandle, KeelHookCallbackHandle, KeelBool) { return KEEL_RESULT_OK; }
     static KeelResult Find(KeelPluginHandle, std::uint32_t source, KeelEntityHandle* out) {
         *out = 0;
-        if (source < 0x1007 || source > 0x1008 || !active->alive[source-0x1007]) return KEEL_RESULT_NOT_FOUND;
+        if (source < 0x1007 || source > 0x1008 || !active->alive[source-0x1007] || (source == 0x1007 && active->pending)) return KEEL_RESULT_NOT_FOUND;
         *out = active->next_entity++; active->leases[*out] = {sizeof(KeelEntityInfo),static_cast<int>(source&0xfff),source,0,active->epoch};
         return KEEL_RESULT_OK;
     }
     static KeelResult Close(KeelPluginHandle, KeelEntityHandle handle) {
-        Check(active->leases.erase(handle) == 1,"lease released exactly once"); return KEEL_RESULT_OK;
+        Check(active->leases.erase(handle) == 1,"lease released exactly once"); active->observers.erase(handle); return KEEL_RESULT_OK;
     }
     static KeelResult Describe(KeelPluginHandle, KeelEntityHandle handle, KeelEntityInfo* out) {
         const auto found = active->leases.find(handle);
-        if (found == active->leases.end() || found->second.epoch != active->epoch || !active->alive[found->second.source2_handle-0x1007]) return KEEL_RESULT_NOT_FOUND;
+        if (found == active->leases.end() || found->second.epoch != active->epoch || !active->alive[found->second.source2_handle-0x1007] ||
+            (found->second.source2_handle == 0x1007 && active->pending) ||
+            (active->observers.contains(handle) && active->owner_closed)) return KEEL_RESULT_NOT_FOUND;
         *out = found->second; return KEEL_RESULT_OK;
     }
     static KeelResult Visit(KeelPluginHandle owner, const KeelEntityAccessSpec* specs, unsigned count, KeelEntityAccessCallback callback, void* data) {
@@ -58,6 +63,27 @@ struct Host {
         const auto status = Describe(owner,specs[0].entity,&info); if (status != KEEL_RESULT_OK) return status;
         if (std::strcmp(specs[0].class_name,"CCSPlayerPawn")) return KEEL_RESULT_INCOMPATIBLE;
         void* pointers[]{&active->objects[info.source2_handle-0x1007]}; return callback(data,pointers,1);
+    }
+    static KeelResult Observe(KeelPluginHandle, std::uint32_t source, KeelEntityHandle* out) {
+        *out = 0;
+        if (source != 0x1007 || !active->pending || active->owner_closed || !active->alive[0]) return KEEL_RESULT_NOT_FOUND;
+        *out = active->next_entity++;
+        active->leases[*out] = {sizeof(KeelEntityInfo),7,source,0,active->epoch};
+        active->observers.insert(*out); ++active->observed; return KEEL_RESULT_OK;
+    }
+    static KeelResult DescribePending(KeelPluginHandle, KeelEntityHandle handle, KeelEntityInfo* out) {
+        const auto found = active->leases.find(handle);
+        if (found == active->leases.end() || !active->observers.contains(handle) || !active->pending ||
+            active->owner_closed || !active->alive[0] || found->second.epoch != active->epoch) return KEEL_RESULT_NOT_FOUND;
+        *out = found->second; return KEEL_RESULT_OK;
+    }
+    static KeelResult VisitPending(KeelPluginHandle owner, KeelEntityHandle handle, const char* name,
+        KeelEntityAccessCallback callback, void* data) {
+        KeelEntityInfo info{}; const auto result = DescribePending(owner,handle,&info);
+        if (result != KEEL_RESULT_OK) return result;
+        if (std::strcmp(name,"CCSPlayerPawn")) return KEEL_RESULT_INCOMPATIBLE;
+        ++active->pending_visits;
+        void* pointers[]{&active->objects[0]}; return callback(data,pointers,1);
     }
     static KeelResult Capture(KeelPluginHandle owner, const void* pointer, KeelEntityHandle* out) {
         ++active->captures;
@@ -85,7 +111,8 @@ struct Host {
     KeelEntityAccessApi access{sizeof(access),KEELS2_ENTITY_ACCESS_API_VERSION,Visit};
     KeelEntityCaptureApi capture{sizeof(capture),KEELS2_ENTITY_CAPTURE_API_VERSION,Capture};
     KeelEntityHookDataApi data{sizeof(data),KEELS2_ENTITY_HOOK_DATA_API_VERSION,Read,Write,Weapon};
-    std::shared_ptr<Service> Make() { return std::make_shared<Service>(17,hooks,runtime,entities,access,capture,data); }
+    KeelEntityConstructionApi construction{sizeof(construction),1,nullptr,nullptr,DescribePending,nullptr,nullptr,nullptr,Observe,VisitPending};
+    std::shared_ptr<Service> Make(bool observe = false) { return std::make_shared<Service>(17,hooks,runtime,entities,access,capture,data,observe ? &construction : nullptr); }
     unsigned Fire(KeelHookFrame& frame, KeelHookCallbackHandle id) { const auto callback = callbacks.at(id); return callback.callback(&frame,callback.user_data); }
 };
 Host* Host::active = nullptr;
@@ -195,6 +222,54 @@ void Capacity() {
     host.Fire(nested.frame,1); Check(delivered == 257,"next invocation recovers after capture capacity frees");
     hooks.clear(); service->Collect(); Check(service->Empty() && host.leases.empty(),"capacity cleanup");
 }
+void Construction() {
+    for (unsigned mode = 0; mode < 6; ++mode) {
+        Host host; host.pending = true; auto service = host.Make(true); unsigned pre{}, post{};
+        auto hook = service->Attach(Definition("spawn"),0x1007,KH_PHASE_BOTH,0,[&](Frame& frame) {
+            Check(frame.Entity() == 0x1007 && frame.Other() == UINT32_MAX,"pending spawn reference");
+            if (frame.Phase() == KH_PHASE_PRE) {
+                ++pre;
+                if (mode == 1) host.owner_closed = true;
+                if (mode == 2) ++host.epoch;
+                return mode == 3 || mode == 5 ? 2 : 0;
+            }
+            ++post;
+            if (mode == 5) Check(frame.Flags() == 0,"blocked pending post reports no original call");
+            return 0;
+        },[] {});
+        Check(host.observed == 1 && host.pending_visits == 1,"pending lease and exact class validation");
+        Native native(host,"spawn");
+        if (mode == 4) {
+            hook.reset(); service->Collect();
+            Check(host.pending && !host.owner_closed && host.leases.empty(),"observer close never cancels pending owner");
+            continue;
+        }
+        Check(host.Fire(native.frame,1) == (mode ? KH_ACTION_SUPERSEDE : KH_ACTION_CONTINUE) && pre == 1,
+            "pending pre fires and owner loss/map/block prevents original");
+        if (mode == 5) {
+            // The post detour can run before the creator cancels a blocked
+            // spawn. Its observation is still pending and original_called=0.
+            native.frame.phase = KH_PHASE_POST; native.frame.flags = 0;
+            host.Fire(native.frame,1);
+            Check(post == 1 && host.pending,"blocked pending post observes before cancellation");
+            host.alive[0] = false; native.frame.phase = KH_PHASE_PRE;
+            host.Fire(native.frame,1); Check(pre == 1,"removed pending entity cannot deliver again");
+        } else {
+            host.pending = false; if (mode == 3) host.alive[0] = false;
+            const auto visits = host.pending_visits;
+            native.Post(); host.Fire(native.frame,1);
+            Check(post == (mode == 0 ? 1u : 0u) && host.pending_visits == visits,
+                "live observer uses ordinary access; canceled/stale/deleted post never delivers");
+        }
+        hook.reset(); service->Collect(); Check(service->Empty() && host.leases.empty(),"pending hook cleanup");
+    }
+    Host host; host.pending = true; auto legacy = host.Make();
+    Reject([&] { legacy->Attach(Definition("spawn"),0x1007,KH_PHASE_PRE,0,[](Frame&) { return 0; },[] {}); },
+        "legacy host cannot discover pending entity");
+    auto service = host.Make(true); auto wrong = Definition("spawn"); wrong.entity_hook.class_name = "CBaseEntity";
+    Reject([&] { service->Attach(wrong,0x1007,KH_PHASE_PRE,0,[](Frame&) { return 0; },[] {}); },"pending class mismatch fails closed");
+    Check(host.leases.empty() && host.callbacks.empty() && host.pending,"failed attach releases only observer");
+}
 void Policy() {
     Host host; auto service = host.Make(); const auto attempt = [&](const dh::Definition& value) { service->Attach(value,0x1007,KH_PHASE_PRE,0,[](Frame&) { return 0; },[] {}); };
     auto value = Definition(); value.entity_hook.block.clear(); Reject([&] { attempt(value); },"unreviewed block contract refused");
@@ -207,6 +282,6 @@ void Policy() {
 }
 }
 int main() {
-    try { Policy(); Damage(); Lifetime(); Touch(); Weapon(); Capacity(); std::cout << "SDKHooks backend checks passed\n"; return 0; }
+    try { Construction(); Policy(); Damage(); Lifetime(); Touch(); Weapon(); Capacity(); std::cout << "SDKHooks backend checks passed\n"; return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

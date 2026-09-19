@@ -25,6 +25,7 @@ struct Lease {
     std::shared_ptr<Service> service;
     KeelEntityHandle handle = 0;
     KeelEntityInfo identity{};
+    bool observer = false;
     ~Lease() {
         if (handle) { service->entities_.release(service->owner_,handle); --service->leases_; }
     }
@@ -69,8 +70,8 @@ void Hook::Enable(bool enabled) { native_->Enable(enabled); state_->pending.clea
 bool Hook::Active() const { return native_->Active(); }
 Service::Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNativeRuntimeApi& runtime,
     const KeelEntitiesApi& entities, const KeelEntityAccessApi& access,
-    const KeelEntityCaptureApi& capture, const KeelEntityHookDataApi& data)
-    : owner_(owner), runtime_(runtime), entities_(entities), access_(access), capture_(capture), data_(data),
+    const KeelEntityCaptureApi& capture, const KeelEntityHookDataApi& data, const KeelEntityConstructionApi* construction)
+    : owner_(owner), runtime_(runtime), entities_(entities), access_(access), capture_(capture), data_(data), construction_(construction ? *construction : KeelEntityConstructionApi{}),
       transport_(std::make_shared<dhooks::Service>(owner,hooks,runtime)) {
     if (entities.size != sizeof(entities) || entities.api_version != KEELS2_ENTITIES_API_VERSION ||
         !entities.find_by_source2_handle || !entities.describe || !entities.release ||
@@ -78,6 +79,9 @@ Service::Service(KeelPluginHandle owner, const KeelHookApi& hooks, const KeelNat
         capture.size != sizeof(capture) || capture.api_version != KEELS2_ENTITY_CAPTURE_API_VERSION || !capture.capture ||
         data.size != sizeof(data) || data.api_version != KEELS2_ENTITY_HOOK_DATA_API_VERSION ||
         !data.read_damage || !data.write_damage || !data.weapon_matches) throw Error("Incompatible SDKHooks host services.");
+    if (construction && (construction->size != sizeof(*construction) ||
+        construction->api_version != KEELS2_ENTITY_CONSTRUCTION_API_VERSION || !construction->describe ||
+        !construction->observe || !construction->visit)) throw Error("Incompatible pending entity observation service.");
     states_.reserve(256);
 }
 void Service::Thread() const { Check(runtime_.check_game_thread(owner_),"SDKHooks operation"); }
@@ -109,10 +113,14 @@ std::shared_ptr<Lease> Service::Acquire(std::uint32_t source) {
     if (source == UINT32_MAX || leases_ >= 512) throw Error("Invalid entity reference or SDKHooks entity limit (512).");
     auto lease = std::make_shared<Lease>(); lease->service = shared_from_this();
     KeelEntityHandle handle{};
-    Check(entities_.find_by_source2_handle(owner_,source,&handle),"Find hook entity");
+    auto result = entities_.find_by_source2_handle(owner_,source,&handle);
+    if (result == KEEL_RESULT_NOT_FOUND && construction_.observe) {
+        result = construction_.observe(owner_,source,&handle); lease->observer = result == KEEL_RESULT_OK;
+    }
+    Check(result,"Find hook entity");
     if (!handle) throw Error("Host returned an empty entity handle.");
     lease->handle = handle; ++leases_; lease->identity.size = sizeof(lease->identity);
-    Check(entities_.describe(owner_,handle,&lease->identity),"Describe hook entity");
+    Check(Describe(*lease,lease->identity),"Describe hook entity");
     if (!Consistent(lease->identity) || lease->identity.source2_handle != source) throw Error("Host returned an invalid entity identity.");
     return lease;
 }
@@ -128,9 +136,24 @@ std::shared_ptr<Lease> Service::Capture(const void* pointer) {
     if (!Consistent(lease->identity)) throw Error("Host returned an invalid captured entity.");
     return lease;
 }
+KeelResult Service::Describe(const Lease& lease, KeelEntityInfo& info) const {
+    if (lease.observer) {
+        const auto result = construction_.describe(owner_,lease.handle,&info);
+        if (result != KEEL_RESULT_NOT_FOUND) return result;
+    }
+    return entities_.describe(owner_,lease.handle,&info);
+}
+KeelResult Service::Visit(const Lease& lease, const char* name, KeelEntityAccessCallback callback, void* data) const {
+    if (lease.observer) {
+        const auto result = construction_.visit(owner_,lease.handle,name,callback,data);
+        if (result != KEEL_RESULT_NOT_FOUND) return result;
+    }
+    const KeelEntityAccessSpec spec{sizeof(spec),0,lease.handle,name};
+    return access_.visit(owner_,&spec,1,callback,data);
+}
 bool Service::Valid(const Lease& lease) const {
     KeelEntityInfo value{}; value.size = sizeof(value);
-    return entities_.describe(owner_,lease.handle,&value) == KEEL_RESULT_OK && Consistent(value) &&
+    return Describe(lease,value) == KEEL_RESULT_OK && Consistent(value) &&
         value.source2_handle == lease.identity.source2_handle && value.epoch == lease.identity.epoch && value.index == lease.identity.index;
 }
 bool Service::Matches(const State& state, const void* pointer) const {
@@ -140,13 +163,12 @@ bool Service::Matches(const State& state, const void* pointer) const {
         return data_.weapon_matches(owner_,state.entity->handle,pointer,&matches) == KEEL_RESULT_OK && matches == KEEL_TRUE;
     }
     struct Match { const void* expected; bool matched = false; } match{pointer};
-    const KeelEntityAccessSpec spec{sizeof(spec),0,state.entity->handle,state.definition.entity_hook.class_name.c_str()};
     const auto visitor = [](void* raw, void* const* pointers, unsigned count) -> KeelResult {
         auto& context = *static_cast<Match*>(raw);
         context.matched = count == 1 && pointers && pointers[0] == context.expected;
         return KEEL_RESULT_OK;
     };
-    return access_.visit(owner_,&spec,1,visitor,&match) == KEEL_RESULT_OK && match.matched;
+    return Visit(*state.entity,state.definition.entity_hook.class_name.c_str(),visitor,&match) == KEEL_RESULT_OK && match.matched;
 }
 std::unique_ptr<Hook> Service::Attach(const dhooks::Definition& definition, std::uint32_t entity,
     unsigned phases, std::int32_t priority, Callback callback, std::function<void()> retire) {
@@ -156,9 +178,8 @@ std::unique_ptr<Hook> Service::Attach(const dhooks::Definition& definition, std:
     state->definition = definition; state->entity = Acquire(entity); state->phases = phases; state->callback = std::move(callback);
     state->pending.reserve(8);
     // Check the exact class before resolving/installing a native target.
-    const KeelEntityAccessSpec spec{sizeof(spec),0,state->entity->handle,definition.entity_hook.class_name.c_str()};
     bool visited = false;
-    Check(access_.visit(owner_,&spec,1,[](void* raw,void* const* pointers,unsigned count) -> KeelResult {
+    Check(Visit(*state->entity,definition.entity_hook.class_name.c_str(),[](void* raw,void* const* pointers,unsigned count) -> KeelResult {
         if (count != 1 || !pointers || !pointers[0]) return KEEL_RESULT_INCOMPATIBLE;
         *static_cast<bool*>(raw) = true; return KEEL_RESULT_OK;
     },&visited),"Validate SDKHooks entity class");
