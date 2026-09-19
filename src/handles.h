@@ -35,6 +35,9 @@ public:
     }
     void Remove(Id id, std::uint64_t owner, std::uint32_t type) {
         auto& entry = Check(id, owner, type);
+        // A resource destructor may reenter this table and grow its storage.
+        // Detach its value before destruction so no entry reference survives.
+        [[maybe_unused]] Value retired = std::move(entry.value);
         entry.owner = 0;
         entry.type = 0;
         entry.value = {};
@@ -50,11 +53,15 @@ public:
         return ids;
     }
     void Retire(std::uint64_t owner, std::uint32_t type = 0) {
+        std::vector<Value> retired;
+        retired.reserve(entries_.size());
         for (auto& entry : entries_) if (entry.owner == owner && (!type || entry.type == type)) {
+            retired.push_back(std::move(entry.value));
             entry.owner = 0;
             entry.type = 0;
             entry.value = {};
         }
+        // Every selected handle is invalid before the first destroy callback.
     }
     std::size_t Count() const {
         std::size_t count = 0;

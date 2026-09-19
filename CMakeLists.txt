@@ -193,6 +193,7 @@ if(BUILD_TESTING)
         add_test(NAME sdktools_entities COMMAND sr_sdktools_test)
         set_tests_properties(sdktools_entities PROPERTIES TIMEOUT 15)
         sr_compile_script(sdktools tests/scripts/sdktools.sp)
+        sr_compile_script(entity_construction tests/scripts/entity_construction.sp)
     endif()
     if(SR_HTTP_EXTENSION)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -466,6 +467,15 @@ if(BUILD_TESTING)
             set_tests_properties(cstrike_native_module PROPERTIES TIMEOUT 30)
         endif()
         if(SR_SDKTOOLS_EXTENSION)
+            if(SR_SDKHOOKS_EXTENSION)
+                add_test(NAME entity_construction_native_module COMMAND sr_module_integration
+                    "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
+                    $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_sdktools>
+                    "${SR_SP_LIBRARY}" "${CMAKE_BINARY_DIR}/scripts/entity_construction.smx" "${CMAKE_SOURCE_DIR}/tests/fixtures/hello/plugin.json"
+                    "${CMAKE_BINARY_DIR}/test-fixtures/entity-construction" "construction" "${CMAKE_BINARY_DIR}/test-fixtures/gameevents.pb"
+                    $<TARGET_FILE:source2root_sdkhooks>)
+                set_tests_properties(entity_construction_native_module PROPERTIES TIMEOUT 30)
+            endif()
             add_test(NAME sdktools_native_module COMMAND sr_module_integration
                 "${SR_KEELS2_BUILD}/package/addons/keels2/bin/${SR_HOST_PLATFORM}/${SR_HOST_NAME}"
                 $<TARGET_FILE:sr_host_adapter> "${SR_TIER0_LIBRARY}" $<TARGET_FILE:source2root> $<TARGET_FILE:source2root_sdktools>

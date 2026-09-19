@@ -3,6 +3,7 @@
 #include <keels2/entities.h>
 #include <keels2/entity_writes.h>
 #include <keels2/entity_tools.h>
+#include <keels2/entity_construction.h>
 #include <keels2/native_runtime.h>
 #include <keels2/players.h>
 #include <array>
@@ -40,6 +41,9 @@ public:
     Entity& operator=(const Entity&) = delete;
     KeelEntityInfo Describe() const;
     bool Valid() const;
+    bool Pending() const;
+    void SetKey(const KeelEntityKeyValue& value) const;
+    void Spawn(bool& invoked) const;
     bool Same(const Entity& other) const;
     std::int32_t Integer(const Field& field) const;
     std::string IntegerText(const Field& field) const;
@@ -64,6 +68,7 @@ private:
     std::shared_ptr<Service> service_;
     KeelEntityHandle handle_ = 0;
     KeelEntityInfo identity_{};
+    bool constructed_ = false;
 };
 // Pure service adapter: no game headers, raw engine addresses or schema offsets
 // exposed to scripts. Its caller keeps the host services alive. All operations
@@ -72,7 +77,9 @@ private:
 class Service final : public std::enable_shared_from_this<Service> {
 public:
     Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes = nullptr, const KeelEntityToolsApi* tools = nullptr);
+        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes = nullptr, const KeelEntityToolsApi* tools = nullptr, const KeelEntityConstructionApi* construction = nullptr);
+    void ConstructionReady() const;
+    std::unique_ptr<Entity> Create(const std::string& classname);
     unsigned WriteCapabilities() const;
     unsigned ToolCapabilities() const;
     std::unique_ptr<Entity> Find(int index);
@@ -86,6 +93,7 @@ private:
     friend class Field;
     void Thread() const;
     std::unique_ptr<Entity> Adopt(KeelEntityHandle handle);
+    KeelEntityInfo Describe(KeelEntityHandle handle, const KeelEntityInfo& expected, bool constructed, bool* pending = nullptr) const;
     KeelPlayerInfo Player(const KeelPlayerConnection& player) const;
     KeelPluginHandle plugin_;
     const KeelEntitiesApi entities_;
@@ -94,6 +102,7 @@ private:
     const KeelNativeRuntimeApi runtime_;
     const KeelEntityWritesApi writes_;
     const KeelEntityToolsApi tools_;
+    const KeelEntityConstructionApi construction_;
     unsigned active_tools_ = 0;
     unsigned active_writes_ = 0;
     unsigned entity_count_ = 0, field_count_ = 0;

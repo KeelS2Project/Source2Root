@@ -14,9 +14,9 @@ enum SchemaType
 }
 // Game-thread operations through Keel's entity/schema services. Availability,
 // field names and types depend on the active game adapter and compatibility
-// profile. No raw memory addresses or guessed offsets are exposed. This
-// SDKTools provides typed reads/writes and entity teleport/model/removal.
-// Spawning, tracing, sound and temp entities require further game services.
+// profile. No raw memory addresses or guessed offsets are exposed.
+// SDKTools provides typed schema access and owned entity construction.
+// Tracing, sound and temp entities require further game services.
 // Checked SDKCall is provided separately by source2root_sdkcall.inc.
 // Handles belong to this script generation and are closed on reload/unload.
 // Entity identity includes the engine serial and map epoch; retained entities
@@ -103,3 +103,35 @@ native bool Entity_Remove(Entity entity);
 // Success means the engine operation was invoked, not that the entity survived
 // or an asset loaded. Failures after callbacks do not roll back game effects.
 // Calls retain provider/service state across callbacks; at most 8 operations may be active.
+
+// Optional host construction API1. All calls run on the game thread. Missing
+// service/profile or engine errors return failure and set GetLastError.
+native bool Entity_ConstructionAvailable();
+// Classname: 1..127 ASCII letters, digits or underscores. Allocates a pending
+// entity owned by this handle. Entity_Close or script/provider unload cancels
+// an unspawned creation. Ordinary lookups cannot acquire pending entities.
+// At most 64 pending creations per native provider; the game may impose a
+// shared limit. Created handles also count toward the 256 entity limit.
+native Entity Entity_Create(const char[] className);
+native bool Entity_IsPending(Entity entity);
+// Pending handles are valid for identity, keys, selected teleport values and
+// SDKHooks registration by Entity_SourceHandle. Schema access, SetModel and
+// Remove require live entities. Stage a model with SetKeyString("model",asset).
+// Keys are copied; names 1..127 bytes, string values <=4095 bytes. At most 128
+// keys and 32768 aggregate name/string bytes. Same-name replacements ignore
+// ASCII case. Classname is fixed; engine-hash collisions are refused.
+// Numeric values must be finite. Bool is 0/1; color is RGBA in 0..255.
+native bool Entity_SetKeyString(Entity entity, const char[] key, const char[] value);
+native bool Entity_SetKeyBool(Entity entity, const char[] key, bool value);
+native bool Entity_SetKeyInt(Entity entity, const char[] key, int value);
+native bool Entity_SetKeyFloat(Entity entity, const char[] key, float value);
+native bool Entity_SetKeyVector(Entity entity, const char[] key, const float value[3]);
+native bool Entity_SetKeyAngles(Entity entity, const char[] key, const float value[3]);
+native bool Entity_SetKeyColor(Entity entity, const char[] key, const int value[4]);
+// Returns engine success and ALWAYS writes whether spawn was invoked, including
+// failure. Never retry when invoked=true: construction has been consumed. Hooks
+// may block spawn; the creator cancels an entity left pending after dispatch.
+// The same handle describes a surviving live entity. Closing it after spawn
+// only drops the handle. Close failed/stale handles too. Map changes invalidate
+// retained identities. Callbacks may close resources while a call is active.
+native bool Entity_DispatchSpawn(Entity entity, bool& invoked);

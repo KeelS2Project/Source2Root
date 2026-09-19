@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 #endif
     try {
-        Check(argc == 10 || argc == 11 || argc == 12 || argc == 15 || argc == 16,
+        Check(argc == 10 || argc == 11 || argc == 12 || argc == 13 || argc == 15 || argc == 16,
             "module_integration host adapter tier0 module extension pawn sample manifest fixture [mode descriptors [random roll roll-manifest [extensions-directory]]]");
         const auto fixture = std::filesystem::absolute(argv[9]);
 #if defined(_WIN32)
@@ -115,6 +115,13 @@ int main(int argc, char** argv) {
         if (argc == 12 && std::string(argv[10]) == "topmenus") {
             Copy(std::filesystem::path(argv[7]).parent_path() / "topmenus_contributor.smx", script / "plugins/top_other/main.smx");
             std::ofstream(script / "plugins/top_other/plugin.json") << R"({"schema":1,"id":"top_other","name":"Top menu contributor","author":"tests","version":"1.0.0","api":2,"entry":"main.smx","enabled":true,"dependencies":[]})";
+        }
+        if (argc == 13 && std::string(argv[10]) == "construction") {
+            Copy(argv[12],plugins / ("zz_sdkhooks" + extension));
+            const auto directory = script / "configs/extensions/source2root.sdkhooks";
+            std::filesystem::create_directories(directory);
+            std::ofstream(directory / "targets.json") << R"({"schema":1,"targets":{"spawn":{"allow_plugins":["hello"],"source":"symbol","module":")"
+                << adapter_name << R"(","symbol":"SrFixtureConstructSpawn","method":true,"return":"void","arguments":["pointer","pointer"],"sdkhook":{"kind":"spawn","class":"CBaseEntity","block":"preserve_result"}}}})";
         }
         if (argc == 12 && std::string(argv[10]) == "sdkhooks") {
             const auto directory = script / "configs/extensions/source2root.sdkhooks";
@@ -603,6 +610,49 @@ int main(int argc, char** argv) {
             Check(stop(), "Counter-Strike host stop"); Check(network_stop(), "Counter-Strike fixture teardown");
             std::cout << messages() << "Counter-Strike native module lifecycle passed\n";
             return 0;
+        }
+        if (argc == 13 && std::string(argv[10]) == "construction") {
+            auto mode = adapter.Get<void (*)(unsigned)>("SrFixtureConstructionMode");
+            auto tally = adapter.Get<unsigned (*)(unsigned)>("SrFixtureConstructionCount");
+            auto epoch = adapter.Get<void (*)()>("SrFixtureEntityEpoch");
+            const auto occurrences = [&](const char* value) {
+                const std::string log = messages(); unsigned total{}; std::size_t at{};
+                while ((at = log.find(value,at)) != std::string::npos) { ++total; at += std::strlen(value); }
+                return total;
+            };
+            Check(occurrences("CONSTRUCTION_SCRIPT_READY") == 1,"construction script binds both providers");
+            run("sr_construct_normal"); run("sr_construct_block"); run("sr_construct_close"); run("sr_construct_close_hook");
+            Check(occurrences("CONSTRUCTION_CASE_OK") == 4 && !tally(4) && tally(3),"pending pre/live post, block and callback closure");
+            mode(2); run("sr_construct_error"); mode(0);
+            Check(occurrences("CONSTRUCTION_CASE_OK") == 5 && !tally(4),"invoked engine failure consumes creation");
+            mode(1); run("sr_construct_retry");
+            Check(occurrences("CONSTRUCTION_RETRY_OK") == 1 && tally(4) == 1,"noninvoked failure retains pending ownership");
+            mode(0); run("sr_construct_finish");
+            Check(occurrences("CONSTRUCTION_FINISH_OK") == 1 && !tally(4) && tally(3),"retry preserves copied staged values and teleport");
+            mode(3); run("sr_construct_normal"); mode(0);
+            Check(occurrences("CONSTRUCTION_CASE_OK") == 6 && contains("active native operation"),"construction call retains SDKTools module during unload attempt");
+            mode(6); run("sr_construct_cancel");
+            Check(occurrences("CONSTRUCTION_CANCEL_OK") == 1 && occurrences("CONSTRUCTION_GROW_OK") == 1 && !tally(4),
+                "engine cancellation may grow the script handle table after detachment");
+            run("sr_construct_leave"); Check(tally(4) == 1,"pending retained for map test");
+            epoch(); run("sr_construct_stale"); Check(occurrences("CONSTRUCTION_STALE_OK") == 1 && !tally(4),"map epoch rejects pending and observed identities");
+            run("sr_construct_leave"); const auto before_reload = tally(1);
+            run("sr plugins reload hello"); frame();
+            Check(occurrences("CONSTRUCTION_SCRIPT_READY") == 2 && tally(1) == before_reload+1 && !tally(4),"script reload cancels old generation pending ownership");
+            run("sr_construct_leave"); const auto before_unload = tally(1);
+            run("sr plugins unload hello"); frame();
+            Check(tally(1) == before_unload+1 && !tally(4),"script unload cancels pending and closes observer hooks");
+            run("keel plugins unload 2"); run("keel plugins load sr_example" + extension); run("sr plugins load hello");
+            run("sr_construct_normal");
+            Check(occurrences("CONSTRUCTION_SCRIPT_READY") == 3 && occurrences("CONSTRUCTION_CASE_OK") == 7,"provider reload rebinds construction service");
+            run("sr_construct_leave");
+            const auto before_stop = tally(1);
+            Check(!stop(),"first shutdown retains providers while scripts release their leases");
+            Check(tally(1) == before_stop+1 && !tally(4),"first shutdown cancels pending ownership before adapter teardown");
+            Check(stop(),"shutdown retry releases all construction and hook provider leases");
+            Check(network_stop(),"construction fixture teardown");
+            Check(!contains("CONSTRUCTION_FAILED"),"all construction script assertions passed");
+            std::cout << messages() << "Entity construction actual-host lifecycle passed\n"; return 0;
         }
         if (argc == 12 && std::string(argv[10]) == "sdktools") {
             auto occurrences = [&](const char* value) {

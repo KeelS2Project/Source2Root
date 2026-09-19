@@ -41,13 +41,33 @@ private:
         if (api->size != sizeof(*api) || api->api_version != KEELS2_ENTITY_TOOLS_API_VERSION) throw sdk::Error("Incompatible entity tools service table.");
         return api;
     }
+    const KeelEntityConstructionApi* OptionalConstruction() {
+        const void* raw{};
+        const auto result = HostContext().QueryService(KEELS2_ENTITY_CONSTRUCTION_SERVICE_NAME,1,&raw);
+        if (result == KEEL_RESULT_NOT_FOUND || result == KEEL_RESULT_UNSUPPORTED) return nullptr;
+        if (result != KEEL_RESULT_OK || !raw) throw sdk::Error("Entity construction service query failed.");
+        const auto* api = static_cast<const KeelEntityConstructionApi*>(raw);
+        if (api->size != sizeof(*api) || api->api_version != 1) throw sdk::Error("Incompatible entity construction service.");
+        return api;
+    }
     bool OnExtensionStart() override {
         service_ = std::make_shared<sdk::Service>(HostContext().PluginHandle(),
             Require<KeelEntitiesApi>(KEELS2_ENTITIES_SERVICE_NAME, KEELS2_ENTITIES_API_VERSION),
             Require<KeelSchemaApi>(KEELS2_SCHEMA_SERVICE_NAME, KEELS2_SCHEMA_API_VERSION),
             Require<KeelPlayersApi>(KEELS2_PLAYERS_SERVICE_NAME, KEELS2_PLAYERS_API_VERSION),
-            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION), OptionalWrites(), OptionalTools());
-        return RegisterNative("Entity_Find", 1, &SDKTools::Find)
+            Require<KeelNativeRuntimeApi>(KEELS2_NATIVE_RUNTIME_SERVICE_NAME, KEELS2_NATIVE_RUNTIME_API_VERSION), OptionalWrites(), OptionalTools(), OptionalConstruction());
+        return RegisterNative("Entity_ConstructionAvailable", 0, &SDKTools::ConstructionAvailable)
+            && RegisterNative("Entity_Create", 1, &SDKTools::Create)
+            && RegisterNative("Entity_IsPending", 1, &SDKTools::Pending)
+            && RegisterNative("Entity_SetKeyString", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_STRING>)
+            && RegisterNative("Entity_SetKeyBool", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_BOOL>)
+            && RegisterNative("Entity_SetKeyInt", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_INT32>)
+            && RegisterNative("Entity_SetKeyFloat", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_FLOAT>)
+            && RegisterNative("Entity_SetKeyVector", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_VECTOR>)
+            && RegisterNative("Entity_SetKeyAngles", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_ANGLES>)
+            && RegisterNative("Entity_SetKeyColor", 3, &SDKTools::SetKey<KEELS2_ENTITY_KEY_COLOR>)
+            && RegisterNative("Entity_DispatchSpawn", 2, &SDKTools::Spawn)
+            && RegisterNative("Entity_Find", 1, &SDKTools::Find)
             && RegisterNative("Entity_FromHandle", 1, &SDKTools::FromHandle)
             && RegisterNative("Entity_FromPlayer", 2, &SDKTools::FromPlayer)
             && RegisterNative("Entity_Close", 1, &SDKTools::Close)
@@ -81,6 +101,41 @@ private:
     }
     static sdk::Entity& Entity(NativeCall& call, unsigned index = 1) { return call.Resource<sdk::Entity>(call.Int(index), EntityType); }
     static sdk::Field& Field(NativeCall& call, unsigned index = 2) { return call.Resource<sdk::Field>(call.Int(index), FieldType); }
+    std::int32_t ConstructionAvailable(NativeCall& call) {
+        return Invoke(call,[&] { const auto service = service_; service->ConstructionReady(); return 1; });
+    }
+    std::int32_t Create(NativeCall& call) {
+        return Invoke(call,[&] { const auto service = service_; return call.Own(EntityType,service->Create(call.String(1))); });
+    }
+    std::int32_t Pending(NativeCall& call) { return Invoke(call,[&] { return Entity(call).Pending() ? 1 : 0; }); }
+    template<unsigned Type> std::int32_t SetKey(NativeCall& call) {
+        return Invoke(call,[&] {
+            const auto name = call.String(2); std::string text;
+            KeelEntityKeyValue value{}; value.size = sizeof(value); value.type = Type; value.name = name.c_str();
+            if constexpr (Type == KEELS2_ENTITY_KEY_STRING) { text = call.String(3); value.string_value = text.c_str(); }
+            else if constexpr (Type == KEELS2_ENTITY_KEY_BOOL || Type == KEELS2_ENTITY_KEY_INT32) value.int_value = call.Int(3);
+            else if constexpr (Type == KEELS2_ENTITY_KEY_FLOAT) value.float_value = call.Float(3);
+            else if constexpr (Type == KEELS2_ENTITY_KEY_COLOR) {
+                const auto cells = call.Array(3,4);
+                for (unsigned i = 0; i < 4; ++i) {
+                    if (cells[i] < 0 || cells[i] > 255) throw sdk::Error("Entity key color components require 0..255.");
+                    value.color_value[i] = static_cast<std::uint8_t>(cells[i]);
+                }
+            } else {
+                const auto cells = call.Array(3,3);
+                for (unsigned i = 0; i < 3; ++i) value.vector_value[i] = std::bit_cast<float>(cells[i]);
+            }
+            Entity(call).SetKey(value); return 1;
+        });
+    }
+    std::int32_t Spawn(NativeCall& call) {
+        call.OutputCell(2,0); bool invoked{};
+        return Invoke(call,[&] {
+            try { Entity(call).Spawn(invoked); }
+            catch (...) { call.OutputCell(2,invoked ? 1 : 0); throw; }
+            call.OutputCell(2,invoked ? 1 : 0); return 1;
+        });
+    }
     std::int32_t Find(NativeCall& call) {
         return Invoke(call, [&] { return call.Own(EntityType, service_->Find(call.Int(1))); });
     }
@@ -97,7 +152,9 @@ private:
         });
     }
     std::int32_t Close(NativeCall& call) {
-        return Invoke(call, [&] { Entity(call).Close(); call.Close(call.Int(1), EntityType); return 1; });
+        // Remove the script resource before its destructor enters cancellation;
+        // reentrant callbacks must already see a closed script handle.
+        return Invoke(call, [&] { call.Close(call.Int(1), EntityType); return 1; });
     }
     std::int32_t Valid(NativeCall& call) { return Entity(call).Valid() ? 1 : 0; }
     std::int32_t Index(NativeCall& call) { return Invoke(call, [&] { return Entity(call).Describe().index; }, -1); }

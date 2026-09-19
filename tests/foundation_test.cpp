@@ -97,6 +97,37 @@ int main(int argc, char** argv) {
     handles.Remove(first, 1, 1);
     auto second = handles.Add(1, 1, 99);
     Require(first != second && !handles.Contains(first, 1, 1), "generation rejects stale handle");
+    // Engine-backed resource destruction may grow or recursively retire this
+    // same handle table. All old entries must be detached before callbacks.
+    {
+        struct Closing { std::function<void()> action; ~Closing() { if (action) action(); } };
+        sr::Handles<std::variant<int,std::shared_ptr<Closing>>> values;
+        std::vector<std::int32_t> ids;
+        unsigned destroyed{};
+        const auto allocate = [&](unsigned count) {
+            for (unsigned i = 0; i < count; ++i) values.Add(2,1,{});
+        };
+        auto close = std::make_shared<Closing>();
+        close->action = [&] {
+            ++destroyed; Require(!values.Contains(ids[0],1,1),"detach before resource callback"); allocate(512);
+        };
+        ids.push_back(values.Add(1,1,std::move(close)));
+        values.Remove(ids[0],1,1);
+        Require(destroyed == 1 && values.Count() == 512,"remove callback safely grows table");
+        values.Retire(2); ids.clear();
+        for (unsigned i = 0; i < 3; ++i) {
+            auto item = std::make_shared<Closing>();
+            item->action = [&] {
+                ++destroyed;
+                for (const auto id : ids) Require(!values.Contains(id,1,1),"bulk retirement detaches every selected handle first");
+                values.Retire(2); allocate(1024);
+            };
+            ids.push_back(values.Add(1,1,std::move(item)));
+        }
+        values.Retire(1);
+        Require(destroyed == 4 && values.Count() == 1024,"bulk callbacks preserve new resources during reentry");
+        values.Retire(2);
+    }
     Host host;
     sr::Foundation app(host, argv[1], root);
     Require(!app.Load(manifest) && host.commands.empty() && !host.leases, "missing native fails cleanly");

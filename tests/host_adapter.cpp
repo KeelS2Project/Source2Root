@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -62,6 +63,24 @@ public:
     uint32_t pawn_handle = 0x23004;
     std::uint64_t entity_epoch = 1;
     std::int32_t entity_objects[3]{31,47,63};
+    struct Created {
+        GameEntityIdentity identity; int object{91};
+        bool pending{true}, owned{true}, busy{}, closed{};
+        struct Key { KeelEntityKeyValue value; std::string text; };
+        std::map<std::string,Key> keys;
+        KeelEntityTeleport teleport{};
+    };
+    std::map<std::uint32_t,std::shared_ptr<Created>> created;
+    std::uint32_t next_created{16};
+    unsigned construction_mode{}, construction_creates{}, construction_cancels{}, construction_spawns{};
+    bool construction_data_valid{};
+    std::shared_ptr<Created> Pending(std::uint64_t token) {
+        if (token > UINT32_MAX) return {};
+        const auto it = created.find(static_cast<std::uint32_t>(token));
+        if (it == created.end() || it->second->identity.epoch != entity_epoch || !it->second->pending ||
+            !it->second->owned || it->second->closed) return {};
+        return it->second;
+    }
     unsigned entity_call_count = 0;
     KeelResult action_status = KEEL_RESULT_OK;
     std::uint64_t input_buttons = 0, input_context = 1;
@@ -146,7 +165,7 @@ public:
         thread = std::this_thread::get_id(); return true;
     }
     bool CompleteStartup(std::string&) override { return true; }
-    void Stop() noexcept override { thread = {}; commands.clear(); variables.clear(); }
+    void Stop() noexcept override { thread = {}; commands.clear(); variables.clear(); created.clear(); }
     bool IsGameThread() const noexcept override { return thread == std::this_thread::get_id(); }
     KeelResult QueryInterface(KeelSource2Capability capability, KeelSource2InterfaceInfo& info) const noexcept override {
         if (capability == KEELS2_SOURCE2_CAPABILITY_CVAR) {
@@ -288,9 +307,15 @@ public:
         return KEEL_RESULT_OK;
     }
     KeelResult FindEntityByIndex(int32_t index, GameEntityIdentity& entity, std::string& error) override {
+        for (const auto& [source,record] : created) if (record->identity.index == index && !record->pending)
+            return FindEntityBySource2Handle(source,entity,error);
         return FindEntityBySource2Handle(index == 3 ? 0x12003 : index == 4 ? 0x23004 : index == 5 ? 0x45005 : 0, entity, error);
     }
     KeelResult FindEntityBySource2Handle(uint32_t handle, GameEntityIdentity& entity, std::string&) override {
+        if (const auto it = created.find(handle); it != created.end()) {
+            if (it->second->pending || it->second->identity.epoch != entity_epoch || removed_entities.contains(handle)) return KEEL_RESULT_NOT_FOUND;
+            entity = it->second->identity; return KEEL_RESULT_OK;
+        }
         if (removed_entities.contains(handle) || (handle != 0x23004 && handle != 0x12003 && handle != 0x45005)) return KEEL_RESULT_NOT_FOUND;
         entity = {handle == 0x12003 ? 3 : handle == 0x23004 ? 4 : 5, handle, entity_epoch};
         if (mutate_pawn == 1) pawn_handle = 0x24004;
@@ -300,6 +325,9 @@ public:
         return KEEL_RESULT_OK;
     }
     KeelResult ValidateEntity(const GameEntityIdentity& entity, std::string&) override {
+        if (const auto it = created.find(entity.source2_handle); it != created.end())
+            return !it->second->pending && it->second->identity.index == entity.index && entity.epoch == entity_epoch &&
+                !removed_entities.contains(entity.source2_handle) ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
         if ((entity.source2_handle != 0x23004 && entity.source2_handle != 0x12003 && entity.source2_handle != 0x45005) ||
             entity.epoch != entity_epoch || removed_entities.contains(entity.source2_handle)) return KEEL_RESULT_NOT_FOUND;
         return entity_status;
@@ -459,6 +487,10 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityAcce
                     std::string error;
                     const auto status = state.ValidateEntity(requests[i].entity,error);
                     if (status != KEEL_RESULT_OK) return status;
+                    if (const auto created = state.created.find(requests[i].entity.source2_handle); created != state.created.end()) {
+                        if (!requests[i].class_name || std::strcmp(requests[i].class_name,"CBaseEntity")) return KEEL_RESULT_INCOMPATIBLE;
+                        pointers[i] = &created->second->object; continue;
+                    }
                     const auto index = requests[i].entity.source2_handle == 0x12003 ? 0 :
                         requests[i].entity.source2_handle == 0x23004 ? 1 : 2;
                     const char* names[]{"CCSPlayerController","CCSPlayerPawn","CTestEntity"};
@@ -833,4 +865,132 @@ extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureRestoreEntities() { if (acti
 extern "C" KEELS2_GAME_ADAPTER_EXPORT bool SrFixtureToolData(KeelEntityTeleport* teleport,char* model,unsigned capacity) {
     if (!active || !teleport || !model || capacity <= active->tool_model.size()) return false;
     *teleport = active->tool_teleport; std::memcpy(model,active->tool_model.c_str(),active->tool_model.size()+1); return true;
+}
+
+// A deterministic engine boundary for the real host + independent SDKTools and
+// SDKHooks plugins. Production native creation has separate registry/KV tests.
+extern "C" KEELS2_GAME_ADAPTER_EXPORT
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+void SrFixtureConstructSpawn(void* instance, const void* values) {
+    if (!active || !instance || !values) std::abort();
+    for (const auto& [source,record] : active->created) {
+        static_cast<void>(source);
+        if (instance != &record->object) continue;
+        if (values != &record->keys) std::abort();
+        if (active->construction_mode != 2) record->pending = false;
+        return;
+    }
+    std::abort();
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT KeelResult KeelGameAdapter_QueryEntityConstruction(
+    unsigned version, GameAdapterEntityConstructionApi* api) noexcept {
+    if (!api || api->size != sizeof(*api)) return KEEL_RESULT_INVALID_ARGUMENT;
+    *api = {}; if (version != 1) return KEEL_RESULT_INCOMPATIBLE;
+    *api = {sizeof(*api),1,
+        [](GameAdapter* base) noexcept -> KeelResult { return base && base->IsGameThread() ? KEEL_RESULT_OK : KEEL_RESULT_WRONG_THREAD; },
+        [](GameAdapter* base,const char* name,std::uint64_t* token,GameEntityIdentity* identity) noexcept -> KeelResult {
+            if (token) *token = 0; if (identity) *identity = {};
+            if (!base || !name || !token || !identity) return KEEL_RESULT_INVALID_ARGUMENT;
+            try {
+                auto& state = *static_cast<Adapter*>(base);
+                if (!state.IsGameThread()) return KEEL_RESULT_WRONG_THREAD;
+                if (std::strcmp(name,"prop_dynamic")) return KEEL_RESULT_UNSUPPORTED;
+                auto record = std::make_shared<Adapter::Created>(); const auto index = state.next_created++;
+                record->identity = {static_cast<int>(index),0x80000+index,state.entity_epoch};
+                state.created.emplace(record->identity.source2_handle,record); ++state.construction_creates;
+                *token = record->identity.source2_handle; *identity = record->identity; return KEEL_RESULT_OK;
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](GameAdapter* base,std::uint64_t token,GameEntityIdentity* identity) noexcept -> KeelResult {
+            if (!base || !identity) return KEEL_RESULT_INVALID_ARGUMENT; *identity = {};
+            const auto record = static_cast<Adapter*>(base)->Pending(token);
+            if (!record) return KEEL_RESULT_NOT_FOUND;
+            *identity = record->identity; return KEEL_RESULT_OK;
+        },
+        [](GameAdapter* base,std::uint64_t token,const KeelEntityKeyValue* value) noexcept -> KeelResult {
+            if (!base || !value) return KEEL_RESULT_INVALID_ARGUMENT;
+            try {
+                auto& state = *static_cast<Adapter*>(base); const auto record = state.Pending(token);
+                if (!record) return KEEL_RESULT_NOT_FOUND;
+                if (record->busy) return KEEL_RESULT_BUSY;
+                std::string name = value->name;
+                std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c) { return c >= 'A' && c <= 'Z' ? c+('a'-'A') : c; });
+                if (name == "classname") return KEEL_RESULT_INVALID_ARGUMENT;
+                auto key = Adapter::Created::Key{*value,value->type == KEELS2_ENTITY_KEY_STRING ? value->string_value : ""};
+                key.value.name = key.value.string_value = nullptr;
+                record->keys.insert_or_assign(name,std::move(key)); return KEEL_RESULT_OK;
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](GameAdapter* base,std::uint64_t token,const KeelEntityTeleport* request) noexcept -> KeelResult {
+            if (!base || !request) return KEEL_RESULT_INVALID_ARGUMENT;
+            const auto record = static_cast<Adapter*>(base)->Pending(token);
+            if (!record) return KEEL_RESULT_NOT_FOUND;
+            if (record->busy) return KEEL_RESULT_BUSY;
+            record->teleport = *request; return KEEL_RESULT_OK;
+        },
+        [](GameAdapter* base,std::uint64_t token,KeelBool* invoked) noexcept -> KeelResult {
+            if (invoked) *invoked = KEEL_FALSE;
+            if (!base || !invoked) return KEEL_RESULT_INVALID_ARGUMENT;
+            try {
+                auto& state = *static_cast<Adapter*>(base); const auto record = state.Pending(token);
+                if (!record) return KEEL_RESULT_NOT_FOUND;
+                if (record->busy) return KEEL_RESULT_BUSY;
+                if (state.construction_mode == 1) return KEEL_RESULT_NOT_READY;
+                record->busy = true; ++state.construction_spawns; *invoked = KEEL_TRUE;
+                if (state.construction_mode == 3) state.Dispatch("keel plugins unload 2",-1);
+                const auto& keys = record->keys;
+                state.construction_data_valid = keys.size() == 7 && keys.contains("model") && keys.at("model").text == "models/test.vmdl" &&
+                    keys.contains("solid") && keys.at("solid").value.type == KEELS2_ENTITY_KEY_BOOL && keys.at("solid").value.int_value == 1 &&
+                    keys.contains("flags") && keys.at("flags").value.int_value == 7 && keys.contains("scale") && keys.at("scale").value.float_value == 1.5f &&
+                    keys.contains("origin") && keys.at("origin").value.vector_value[2] == 3 && keys.contains("angles") && keys.at("angles").value.vector_value[0] == 4 &&
+                    keys.contains("rendercolor") && keys.at("rendercolor").value.color_value[3] == 255 && record->teleport.flags == 1 && record->teleport.position[0] == 10;
+                SrFixtureConstructSpawn(&record->object,&record->keys);
+                record->busy = false; record->owned = false;
+                if (record->pending) { state.created.erase(record->identity.source2_handle); return KEEL_RESULT_ENGINE_FAILURE; }
+                return KEEL_RESULT_OK;
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](GameAdapter* base,std::uint64_t token) noexcept -> KeelResult {
+            if (!base || token > UINT32_MAX) return KEEL_RESULT_INVALID_ARGUMENT;
+            try {
+                auto& state = *static_cast<Adapter*>(base); const auto it = state.created.find(static_cast<std::uint32_t>(token));
+                if (it == state.created.end()) return KEEL_RESULT_NOT_FOUND;
+                const auto record = it->second; record->owned = false; record->closed = true;
+                const bool current = record->identity.epoch == state.entity_epoch;
+                if (record->pending) {
+                    if (current) ++state.construction_cancels;
+                    if (!record->busy) state.created.erase(it);
+                }
+                if (current && state.construction_mode == 6) {
+                    state.construction_mode = 0;
+                    if (!state.Dispatch("sr_construct_cancel_grow",-1)) return KEEL_RESULT_ENGINE_FAILURE;
+                }
+                return current ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        },
+        [](GameAdapter* base,std::uint64_t token,const char* name,KeelEntityAccessCallback callback,void* data) noexcept -> KeelResult {
+            if (!base || !name || !callback) return KEEL_RESULT_INVALID_ARGUMENT;
+            try {
+                const auto record = static_cast<Adapter*>(base)->Pending(token);
+                if (!record) return KEEL_RESULT_NOT_FOUND;
+                if (std::strcmp(name,"CBaseEntity")) return KEEL_RESULT_INCOMPATIBLE;
+                void* pointers[]{&record->object}; return callback(data,pointers,1);
+            } catch (...) { return KEEL_RESULT_ENGINE_FAILURE; }
+        }};
+    return KEEL_RESULT_OK;
+}
+extern "C" KEELS2_GAME_ADAPTER_EXPORT void SrFixtureConstructionMode(unsigned mode) { if (active) active->construction_mode = mode; }
+extern "C" KEELS2_GAME_ADAPTER_EXPORT unsigned SrFixtureConstructionCount(unsigned kind) {
+    if (!active) return 0;
+    if (kind == 0) return active->construction_creates;
+    if (kind == 1) return active->construction_cancels;
+    if (kind == 2) return active->construction_spawns;
+    if (kind == 3) return active->construction_data_valid ? 1 : 0;
+    return static_cast<unsigned>(std::count_if(active->created.begin(),active->created.end(),[](const auto& item) {
+        return item.second->pending && item.second->identity.epoch == active->entity_epoch;
+    }));
 }

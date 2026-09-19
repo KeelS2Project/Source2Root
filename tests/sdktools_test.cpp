@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -28,6 +29,13 @@ struct Fixture {
     std::vector<std::byte> last_write;
     std::function<void()> on_write, on_tool, on_tool_caps;
     unsigned tool_calls = 0, tool_kind = 0, tool_caps = 7;
+    std::set<KeelEntityHandle> pending;
+    unsigned creates = 0, cancels = 0, keys = 0, spawns = 0, pending_teleports = 0;
+    KeelResult construction_status = KEEL_RESULT_OK, spawn_status = KEEL_RESULT_OK;
+    bool invoke_spawn = true, bad_created_metadata = false;
+    std::function<void()> on_create, on_key, on_spawn, on_cancel, on_pending_teleport;
+    KeelEntityKeyValue last_key{};
+    std::string key_name, key_text;
     KeelResult tool_status = KEEL_RESULT_OK, tool_caps_status = KEEL_RESULT_OK;
     KeelEntityTeleport last_teleport{};
     std::string last_model;
@@ -64,12 +72,16 @@ struct Fixture {
     static KeelResult ByIndex(KeelPluginHandle owner, std::int32_t index, KeelEntityHandle* output) {
         return Find(owner, index == 3 ? 0x12003 : index == 4 ? 0x23004 : index == 5 ? 0x45005 : 0, output);
     }
-    static KeelResult Release(KeelPluginHandle, KeelEntityHandle handle) { return active->entities.erase(handle) ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND; }
+    static KeelResult Release(KeelPluginHandle, KeelEntityHandle handle) {
+        auto& s = *active; const bool existed = s.entities.erase(handle) != 0;
+        if (s.pending.erase(handle)) { ++s.cancels; const auto callback = s.on_cancel; if (callback) callback(); }
+        return existed ? KEEL_RESULT_OK : KEEL_RESULT_NOT_FOUND;
+    }
     static KeelResult Describe(KeelPluginHandle, KeelEntityHandle handle, KeelEntityInfo* info) {
         auto& s = *active;
         if (s.available != KEEL_RESULT_OK) return s.available;
         const auto found = s.entities.find(handle);
-        if (found == s.entities.end() || found->second.epoch != s.epoch) return KEEL_RESULT_NOT_FOUND;
+        if (found == s.entities.end() || found->second.epoch != s.epoch || s.pending.contains(handle)) return KEEL_RESULT_NOT_FOUND;
         *info = found->second;
         if (s.wrong_identity) ++info->source2_handle;
         return KEEL_RESULT_OK;
@@ -167,6 +179,48 @@ struct Fixture {
         if (kind == KEELS2_ENTITY_TOOL_REMOVE) s.entities.erase(entity);
         return s.tool_status;
     }
+    static KeelResult ConstructionReady(KeelPluginHandle owner) {
+        const auto thread = Thread(owner); return thread == KEEL_RESULT_OK ? active->construction_status : thread;
+    }
+    static KeelResult Create(KeelPluginHandle owner, const char* name, KeelEntityHandle* output) {
+        auto& s = *active; *output = 0;
+        const auto ready = ConstructionReady(owner); if (ready != KEEL_RESULT_OK) return ready;
+        const std::string before = name;
+        *output = s.next++; ++s.creates;
+        s.entities[*output] = {sizeof(KeelEntityInfo),6,0x60006+s.creates*0x1000,0,s.epoch};
+        s.pending.insert(*output); const auto callback = s.on_create; if (callback) callback();
+        Check(before == name,"factory input is copied before callbacks"); return KEEL_RESULT_OK;
+    }
+    static KeelResult DescribePending(KeelPluginHandle, KeelEntityHandle handle, KeelEntityInfo* info) {
+        auto& s = *active; const auto it = s.entities.find(handle);
+        if (!s.pending.contains(handle) || it == s.entities.end() || it->second.epoch != s.epoch) return KEEL_RESULT_NOT_FOUND;
+        *info = it->second; if (s.bad_created_metadata) info->size = 0; return KEEL_RESULT_OK;
+    }
+    static KeelResult SetKey(KeelPluginHandle owner, KeelEntityHandle handle, const KeelEntityKeyValue* value) {
+        auto& s = *active; KeelEntityInfo info{};
+        if (DescribePending(owner,handle,&info) != KEEL_RESULT_OK) return KEEL_RESULT_NOT_FOUND;
+        ++s.keys; const auto callback = s.on_key; if (callback) callback();
+        s.last_key = *value; s.key_name = value->name; s.key_text = value->string_value; return KEEL_RESULT_OK;
+    }
+    static KeelResult TeleportPending(KeelPluginHandle owner, KeelEntityHandle handle, const KeelEntityTeleport* value) {
+        auto& s = *active; KeelEntityInfo info{};
+        if (DescribePending(owner,handle,&info) != KEEL_RESULT_OK) return KEEL_RESULT_NOT_FOUND;
+        ++s.pending_teleports; const auto callback = s.on_pending_teleport; if (callback) callback();
+        s.last_teleport = *value; return KEEL_RESULT_OK;
+    }
+    static KeelResult Spawn(KeelPluginHandle owner, KeelEntityHandle handle, KeelBool* invoked) {
+        auto& s = *active; *invoked = KEEL_FALSE; KeelEntityInfo info{};
+        if (DescribePending(owner,handle,&info) != KEEL_RESULT_OK) return KEEL_RESULT_NOT_FOUND;
+        if (!s.invoke_spawn) return s.spawn_status;
+        ++s.spawns; *invoked = KEEL_TRUE;
+        const auto callback = s.on_spawn; if (callback) callback();
+        s.pending.erase(handle); if (s.spawn_status != KEEL_RESULT_OK) s.entities.erase(handle);
+        return s.spawn_status;
+    }
+    static inline const KeelEntityConstructionApi construction_api{sizeof(KeelEntityConstructionApi),1,ConstructionReady,Create,
+        DescribePending,SetKey,TeleportPending,Spawn,
+        [](KeelPluginHandle,std::uint32_t,KeelEntityHandle*) { return KEEL_RESULT_UNSUPPORTED; },
+        [](KeelPluginHandle,KeelEntityHandle,const char*,KeelEntityAccessCallback,void*) { return KEEL_RESULT_UNSUPPORTED; }};
     static inline const KeelEntityToolsApi tools_api{sizeof(KeelEntityToolsApi),1,ToolCapabilities,
         [](KeelPluginHandle p,KeelEntityHandle e,const KeelEntityTeleport* t) { return Tool(p,e,1,t,nullptr); },
         [](KeelPluginHandle p,KeelEntityHandle e,const char* model) { return Tool(p,e,2,nullptr,model); },
@@ -176,12 +230,99 @@ struct Fixture {
     static inline const KeelSchemaApi schema_api{sizeof(KeelSchemaApi), 1, Resolve, ReleaseField, DescribeField};
     static inline const KeelPlayersApi player_api{sizeof(KeelPlayersApi), 1, nullptr, nullptr, Player};
     static inline const KeelNativeRuntimeApi runtime_api{sizeof(KeelNativeRuntimeApi), 1, Thread, nullptr, nullptr, nullptr};
-    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api, &writes_api, &tools_api); }
+    std::shared_ptr<Service> ServiceFor(std::uint64_t owner = 1, bool construction = false) { return std::make_shared<Service>(owner, entity_api, schema_api, player_api, runtime_api, &writes_api, &tools_api, construction ? &construction_api : nullptr); }
 };
 Fixture* Fixture::active = nullptr;
+void Construction() {
+    Fixture f; auto service = f.ServiceFor(1,true); service->ConstructionReady();
+    auto legacy = f.ServiceFor(); Reject([&] { legacy->ConstructionReady(); },"legacy readiness");
+    Reject([&] { legacy->Create("prop_dynamic"); },"legacy create");
+    Reject([&] { service->Create("bad/class"); },"invalid class before factory");
+    std::string classname = "prop_dynamic";
+    f.on_create = [&] { classname = "mutated"; };
+    auto entity = service->Create(classname); f.on_create = {};
+    Check(entity->Valid() && entity->Pending() && entity->Same(*entity) && f.creates == 1,"owned pending identity");
+    auto ordinary = service->Find(4); Check(!ordinary->Pending(),"ordinary entity is not pending");
+    auto field = service->Resolve("CTestEntity","value",KEELS2_SCHEMA_INT32);
+    Reject([&] { entity->Integer(*field); },"pending schema read refused");
+    Reject([&] { entity->SetInteger(*field,7); },"pending schema write refused");
+    Reject([&] { entity->SetModel("model.vmdl"); },"pending live model operation refused");
+    Reject([&] { entity->Remove(); },"pending live removal refused");
+    char name[] = "model", text[] = "models/test.vmdl";
+    KeelEntityKeyValue value{}; value.size = sizeof(value); value.type = KEELS2_ENTITY_KEY_STRING; value.name = name; value.string_value = text;
+    f.on_key = [&] { name[0] = text[0] = 'X'; };
+    entity->SetKey(value); f.on_key = {};
+    Check(f.key_name == "model" && f.key_text == "models/test.vmdl","copied key text survives callback mutation");
+    value.name = "sample"; value.string_value = "";
+    for (unsigned kind = 2; kind <= 7; ++kind) {
+        value.type = kind; value.int_value = 1; value.float_value = 2.5f;
+        value.vector_value[0] = 3; value.vector_value[1] = 4; value.vector_value[2] = 5;
+        value.color_value[0] = 10; value.color_value[1] = 20; value.color_value[2] = 30; value.color_value[3] = 255;
+        entity->SetKey(value); Check(f.last_key.type == kind && f.last_key.color_value[3] == 255,"typed key payload");
+    }
+    Check(f.keys == 7,"all seven key types");
+    value.type = KEELS2_ENTITY_KEY_BOOL; value.int_value = 2;
+    Reject([&] { entity->SetKey(value); },"bad bool refused");
+    value.type = KEELS2_ENTITY_KEY_FLOAT; value.float_value = std::numeric_limits<float>::infinity();
+    Reject([&] { entity->SetKey(value); },"bad float refused");
+    value.type = KEELS2_ENTITY_KEY_VECTOR; value.vector_value[1] = std::numeric_limits<float>::quiet_NaN();
+    Reject([&] { entity->SetKey(value); },"bad vector refused");
+    value.type = KEELS2_ENTITY_KEY_INT32; value.name = "sample";
+    Reject([&] { ordinary->SetKey(value); },"ordinary handle cannot stage keys");
+    Check(f.keys == 7,"invalid keys have no host effects");
+    std::array<float,3> position{1,2,3};
+    f.on_pending_teleport = [&] { position[0] = 99; };
+    entity->Teleport(1,position,{},{}); f.on_pending_teleport = {};
+    Check(f.pending_teleports == 1 && !f.tool_calls && f.last_teleport.position[0] == 1,"pending teleport copies selected values");
+    std::thread worker([&] { Reject([&] { entity->Close(); },"worker cannot cancel pending"); }); worker.join();
+    Check(entity->Pending(),"failed thread check retains ownership");
+    f.invoke_spawn = false; f.spawn_status = KEEL_RESULT_NOT_READY; bool invoked = true;
+    Reject([&] { entity->Spawn(invoked); },"noninvoked spawn failure");
+    Check(!invoked && entity->Pending(),"noninvoked remains retryable");
+    f.invoke_spawn = true; f.spawn_status = KEEL_RESULT_OK; entity->Spawn(invoked);
+    Check(invoked && entity->Valid() && !entity->Pending(),"same handle transitions to live");
+    Reject([&] { entity->Spawn(invoked); },"spawn cannot repeat"); Check(!invoked && f.spawns == 1,"repeat not invoked");
+    Reject([&] { entity->SetKey(value); },"consumed construction cannot stage keys");
+    entity.reset(); Check(f.cancels == 0,"live close drops only handle");
+    entity = service->Create("prop_dynamic"); f.spawn_status = KEEL_RESULT_ENGINE_FAILURE;
+    Reject([&] { entity->Spawn(invoked); },"invoked engine failure");
+    Check(invoked && !entity->Valid(),"invoked marker survives failure"); entity.reset(); f.spawn_status = KEEL_RESULT_OK;
+    f.bad_created_metadata = true; const auto before_metadata = f.cancels;
+    Reject([&] { service->Create("prop_dynamic"); },"invalid factory metadata releases owner");
+    Check(f.cancels == before_metadata+1,"metadata failure cancels pending"); f.bad_created_metadata = false;
+    entity = service->Create("prop_dynamic"); const auto before_close = f.cancels;
+    f.on_cancel = [&] { entity.reset(); }; entity->Close(); f.on_cancel = {};
+    Check(!entity && f.cancels == before_close+1,"close may destroy its own Entity exactly once");
+    entity = service->Create("prop_dynamic"); f.on_key = [&] { entity.reset(); };
+    entity->SetKey(value); f.on_key = {}; Check(!entity,"key callback may destroy target");
+    entity = service->Create("prop_dynamic"); f.on_pending_teleport = [&] { entity.reset(); };
+    entity->Teleport(1,{1,2,3},{},{}); f.on_pending_teleport = {}; Check(!entity,"teleport callback may destroy target");
+    entity = service->Create("prop_dynamic"); f.on_spawn = [&] { entity.reset(); service.reset(); };
+    entity->Spawn(invoked); f.on_spawn = {}; Check(invoked && !entity && !service,"spawn retains service after both owners close");
+    ordinary.reset(); field.reset(); service = f.ServiceFor(1,true);
+    entity = service->Create("prop_dynamic"); ++f.epoch;
+    Reject([&] { entity->SetKey(value); },"map stale creation refused"); entity.reset();
+    std::vector<std::unique_ptr<Entity>> held;
+    for (unsigned i = 0; i < 255; ++i) held.push_back(service->Find(4));
+    f.on_create = [&] { Reject([&] { service->Find(4); },"factory callback sees reserved provider slot"); };
+    entity = service->Create("prop_dynamic"); f.on_create = {};
+    Check(service->EntityCount() == 256,"creation quota reserved before callback"); entity.reset(); held.clear();
+    unsigned depth{};
+    f.on_create = [&] {
+        ++depth;
+        if (depth == 8) Reject([&] { service->Create("prop_dynamic"); },"creation recursion limit");
+        else held.push_back(service->Create("prop_dynamic"));
+        --depth;
+    };
+    entity = service->Create("prop_dynamic"); f.on_create = {};
+    Check(held.size() == 7,"bounded nested factory callbacks"); held.clear(); entity.reset();
+    Check(f.pending.empty() && f.entities.empty() && service->EntityCount() == 0,"construction resources cleaned");
+}
+
 }
 int main() {
     try {
+        Construction();
         Fixture fixture;
         auto service = fixture.ServiceFor();
         auto resolve = [&](unsigned type) { return service->Resolve("CTestEntity", "value", type); };

@@ -103,8 +103,8 @@ IntegerValue ParseInteger(const std::string& text) {
 
 }
 Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const KeelSchemaApi& schema,
-        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes, const KeelEntityToolsApi* tools)
-    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime), writes_(writes ? *writes : KeelEntityWritesApi{}), tools_(tools ? *tools : KeelEntityToolsApi{}) {
+        const KeelPlayersApi& players, const KeelNativeRuntimeApi& runtime, const KeelEntityWritesApi* writes, const KeelEntityToolsApi* tools, const KeelEntityConstructionApi* construction)
+    : plugin_(plugin), entities_(entities), schema_(schema), players_(players), runtime_(runtime), writes_(writes ? *writes : KeelEntityWritesApi{}), tools_(tools ? *tools : KeelEntityToolsApi{}), construction_(construction ? *construction : KeelEntityConstructionApi{}) {
     if (!plugin || entities.size != sizeof(entities) || entities.api_version != KEELS2_ENTITIES_API_VERSION ||
         !entities.find_by_index || !entities.find_by_source2_handle || !entities.release || !entities.describe || !entities.equal || !entities.read_field ||
         schema.size != sizeof(schema) || schema.api_version != KEELS2_SCHEMA_API_VERSION ||
@@ -116,8 +116,47 @@ Service::Service(KeelPluginHandle plugin, const KeelEntitiesApi& entities, const
         !writes->capabilities || !writes->write_field)) throw Error("Incompatible entity write service.");
     if (tools && (tools->size != sizeof(*tools) || tools->api_version != KEELS2_ENTITY_TOOLS_API_VERSION ||
         !tools->capabilities || !tools->teleport || !tools->set_model || !tools->remove)) throw Error("Incompatible entity tools service.");
+    if (construction && (construction->size != sizeof(*construction) || construction->api_version != KEELS2_ENTITY_CONSTRUCTION_API_VERSION ||
+        !construction->ready || !construction->create || !construction->describe || !construction->set ||
+        !construction->teleport || !construction->spawn || !construction->observe || !construction->visit))
+        throw Error("Incompatible entity construction service.");
 }
 void Service::Thread() const { Check(runtime_.check_game_thread(plugin_), "Entity operation"); }
+void Service::ConstructionReady() const {
+    const auto keep = shared_from_this(); keep->Thread();
+    if (!keep->construction_.ready) throw Error("Entity construction service is unavailable.");
+    Check(keep->construction_.ready(keep->plugin_),"Entity construction availability");
+}
+std::unique_ptr<Entity> Service::Create(const std::string& classname) {
+    const auto keep = shared_from_this(); const auto name = classname; keep->Thread();
+    if (name.empty() || name.size() > KEELS2_ENTITY_KEY_MAX_NAME ||
+        std::any_of(name.begin(),name.end(),[](unsigned char c) {
+            return !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_');
+        })) throw Error("Entity classname requires 1..127 ASCII letters, digits or underscores.");
+    if (!keep->construction_.create) throw Error("Entity construction service is unavailable.");
+    if (keep->entity_count_ >= 256) throw Error("Entity provider limit (256 handles) reached.");
+    if (keep->active_tools_ >= 8) throw Error("Entity operation recursion limit (8) reached.");
+    struct Hold { unsigned& count; ~Hold() { --count; } } hold{keep->active_tools_}; ++hold.count;
+    // Reserve provider capacity and ownership before any factory callback.
+    auto entity = std::unique_ptr<Entity>(new Entity(keep,0)); entity->constructed_ = true;
+    Check(keep->construction_.create(keep->plugin_,name.c_str(),&entity->handle_),"Create entity");
+    if (!entity->handle_) throw Error("Host returned an empty created entity.");
+    KeelEntityInfo info{}; info.size = sizeof(info);
+    Check(keep->construction_.describe(keep->plugin_,entity->handle_,&info),"Describe created entity");
+    if (!Consistent(info)) throw Error("Host returned invalid created entity identity.");
+    entity->identity_ = info; return entity;
+}
+KeelEntityInfo Service::Describe(KeelEntityHandle handle, const KeelEntityInfo& expected, bool constructed, bool* pending) const {
+    if (pending) *pending = false;
+    Thread(); if (!handle) throw Error("Entity handle is closed.");
+    KeelEntityInfo current{}; current.size = sizeof(current);
+    auto result = constructed ? construction_.describe(plugin_,handle,&current) : KEEL_RESULT_NOT_FOUND;
+    if (constructed && result == KEEL_RESULT_OK) { if (pending) *pending = true; }
+    else if (result == KEEL_RESULT_NOT_FOUND) result = entities_.describe(plugin_,handle,&current);
+    Check(result,"Validate entity");
+    if (!Identity(expected,current)) throw Error("Entity identity changed.");
+    return current;
+}
 unsigned Service::WriteCapabilities() const {
     Thread();
     if (!writes_.capabilities) throw Error("Entity write service is unavailable.");
@@ -220,40 +259,92 @@ void Field::Close() {
 }
 Entity::Entity(std::shared_ptr<Service> service, KeelEntityHandle handle) : service_(std::move(service)), handle_(handle) { ++service_->entity_count_; }
 Entity::~Entity() {
-    if (handle_) service_->entities_.release(service_->plugin_, handle_);
-    --service_->entity_count_;
+    const auto keep = service_; const auto handle = std::exchange(handle_,0);
+    --keep->entity_count_;
+    if (handle) keep->entities_.release(keep->plugin_,handle);
 }
 void Entity::Close() {
-    service_->Thread();
-    if (!handle_) return;
-    const auto result = service_->entities_.release(service_->plugin_, handle_);
-    if (result != KEEL_RESULT_NOT_FOUND && result != KEEL_RESULT_NOT_READY) Check(result, "Release entity");
-    handle_ = 0;
+    const auto keep = service_; keep->Thread();
+    const auto handle = std::exchange(handle_,0); if (!handle) return;
+    // Release may destroy this Entity through a reentrant script callback.
+    const auto result = keep->entities_.release(keep->plugin_,handle);
+    if (result != KEEL_RESULT_NOT_FOUND && result != KEEL_RESULT_NOT_READY) Check(result,"Release entity");
 }
 KeelEntityInfo Entity::Describe() const {
-    service_->Thread();
-    if (!handle_) throw Error("Entity handle is closed.");
-    KeelEntityInfo current{sizeof(current), -1, KEELS2_INVALID_SOURCE2_ENTITY_HANDLE, 0, 0};
-    Check(service_->entities_.describe(service_->plugin_, handle_, &current), "Validate entity");
-    if (!Identity(identity_, current)) throw Error("Entity identity changed.");
-    return current;
+    const auto keep = service_; const auto handle = handle_; const auto expected = identity_;
+    const bool constructed = constructed_;
+    return keep->Describe(handle,expected,constructed);
 }
 bool Entity::Valid() const { try { Describe(); return true; } catch (const Error&) { return false; } }
+bool Entity::Pending() const {
+    const auto keep = service_; const auto handle = handle_; const auto expected = identity_; const bool constructed = constructed_;
+    bool pending{}; keep->Describe(handle,expected,constructed,&pending); return pending;
+}
 bool Entity::Same(const Entity& other) const {
-    if (service_ != other.service_) throw Error("Entities belong to different service owners.");
-    const auto left = Describe(), right = other.Describe();
+    const auto keep = service_; const auto left_handle = handle_, right_handle = other.handle_;
+    const auto left_expected = identity_, right_expected = other.identity_;
+    const bool left_created = constructed_, right_created = other.constructed_;
+    if (keep != other.service_) throw Error("Entities belong to different service owners.");
+    bool left_pending{}, right_pending{};
+    auto left = keep->Describe(left_handle,left_expected,left_created,&left_pending);
+    const auto right = keep->Describe(right_handle,right_expected,right_created,&right_pending);
+    if (left_pending || right_pending) {
+        left = keep->Describe(left_handle,left_expected,left_created);
+        return Identity(left,right);
+    }
     KeelBool equal = KEEL_FALSE;
-    Check(service_->entities_.equal(service_->plugin_, handle_, other.handle_, &equal), "Compare entities");
-    if (equal > KEEL_TRUE || (equal == KEEL_TRUE) != Identity(left, right)) throw Error("Host returned inconsistent entity equality.");
+    Check(keep->entities_.equal(keep->plugin_,left_handle,right_handle,&equal),"Compare entities");
+    if (equal > KEEL_TRUE || (equal == KEEL_TRUE) != Identity(left,right)) throw Error("Host returned inconsistent entity equality.");
     return equal == KEEL_TRUE;
 }
+void Entity::SetKey(const KeelEntityKeyValue& input) const {
+    const auto keep = service_; const auto handle = handle_; const auto expected = identity_; const bool constructed = constructed_;
+    auto value = input;
+    const auto text = [](const char* input, unsigned maximum, bool empty) {
+        if (!input) throw Error("Missing entity key text.");
+        std::size_t length{}; while (length <= maximum && input[length]) ++length;
+        if (length > maximum || (!length && !empty)) throw Error("Entity key name or text exceeds its bounds.");
+        return std::string(input,length);
+    };
+    if (value.size != sizeof(value) || value.type < KEELS2_ENTITY_KEY_STRING || value.type > KEELS2_ENTITY_KEY_COLOR)
+        throw Error("Invalid entity key type.");
+    const auto name = text(value.name,KEELS2_ENTITY_KEY_MAX_NAME,false);
+    const auto string = value.type == KEELS2_ENTITY_KEY_STRING ? text(value.string_value,KEELS2_ENTITY_KEY_MAX_STRING,true) : std::string{};
+    value.name = name.c_str(); value.string_value = string.c_str();
+    if (value.type == KEELS2_ENTITY_KEY_BOOL && value.int_value != 0 && value.int_value != 1) throw Error("Boolean entity key requires zero or one.");
+    if (value.type == KEELS2_ENTITY_KEY_FLOAT && !std::isfinite(value.float_value)) throw Error("Entity key float must be finite.");
+    if (value.type == KEELS2_ENTITY_KEY_VECTOR || value.type == KEELS2_ENTITY_KEY_ANGLES)
+        for (const float number : value.vector_value) if (!std::isfinite(number)) throw Error("Entity key vector must be finite.");
+    keep->Thread();
+    if (!constructed) throw Error("Entity was not created by this owner.");
+    if (keep->active_tools_ >= 8) throw Error("Entity operation recursion limit (8) reached.");
+    struct Hold { unsigned& count; ~Hold() { --count; } } hold{keep->active_tools_}; ++hold.count;
+    bool pending{}; keep->Describe(handle,expected,true,&pending);
+    if (!pending) throw Error("Entity construction is already consumed.");
+    Check(keep->construction_.set(keep->plugin_,handle,&value),"Set entity key");
+}
+void Entity::Spawn(bool& invoked) const {
+    invoked = false;
+    const auto keep = service_; const auto handle = handle_; const auto expected = identity_; const bool constructed = constructed_;
+    keep->Thread();
+    if (!constructed) throw Error("Entity was not created by this owner.");
+    if (keep->active_tools_ >= 8) throw Error("Entity operation recursion limit (8) reached.");
+    struct Hold { unsigned& count; ~Hold() { --count; } } hold{keep->active_tools_}; ++hold.count;
+    bool pending{}; keep->Describe(handle,expected,true,&pending);
+    if (!pending) throw Error("Entity construction is already consumed.");
+    KeelBool called{}; const auto result = keep->construction_.spawn(keep->plugin_,handle,&called);
+    invoked = called != KEEL_FALSE;
+    if (called > KEEL_TRUE) throw Error("Host returned an invalid spawn invocation marker.");
+    Check(result,"Dispatch entity spawn");
+}
 void Entity::Read(const Field& field, void* output, unsigned size) const {
-    service_->Thread();
-    if (!handle_ || !field.handle_) throw Error("Entity or schema field is closed.");
-    if (field.service_ != service_ || field.size_ != size) throw Error("Schema field belongs to another owner or has a different type.");
-    Describe();
-    Check(service_->entities_.read_field(service_->plugin_, handle_, field.handle_, output, size), "Read entity field");
-    Describe();
+    const auto keep = service_; const auto handle = handle_, property = field.handle_; const auto expected = identity_;
+    if (!handle || !property) throw Error("Entity or schema field is closed.");
+    if (field.service_ != keep || field.size_ != size) throw Error("Schema field belongs to another owner or has a different type.");
+    // Schema access remains live-only, even for a construction-owned handle.
+    keep->Describe(handle,expected,false);
+    Check(keep->entities_.read_field(keep->plugin_,handle,property,output,size),"Read entity field");
+    keep->Describe(handle,expected,false);
 }
 void Entity::Write(const Field& field, const void* value, unsigned size) const {
     // Capture ownership before entering host calls. The notification may invoke
@@ -278,11 +369,15 @@ void Entity::Tool(unsigned kind, const KeelEntityTeleport* request, const char* 
     // Capture everything first; retain the service through callback completion.
     auto service = service_;
     const auto entity = handle_;
-    const auto expected = identity_;
+    const auto expected = identity_; const bool constructed = constructed_;
     if (!entity) throw Error("Entity handle is closed.");
     service->Thread();
     if (service->active_tools_ >= 8) throw Error("Entity operation recursion limit (8) reached.");
     struct Hold { unsigned& count; explicit Hold(unsigned& value) : count(value) { ++count; } ~Hold() { --count; } } hold(service->active_tools_);
+    if (constructed && kind == KEELS2_ENTITY_TOOL_TELEPORT) {
+        bool pending{}; service->Describe(entity,expected,true,&pending);
+        if (pending) { Check(service->construction_.teleport(service->plugin_,entity,request),"Teleport pending entity"); return; }
+    }
     if (!(service->ToolCapabilities() & kind)) throw Error("Entity operation is unsupported by this game build.");
     KeelEntityInfo current{sizeof(current), -1, KEELS2_INVALID_SOURCE2_ENTITY_HANDLE, 0, 0};
     Check(service->entities_.describe(service->plugin_,entity,&current), "Validate entity operation");
@@ -336,7 +431,7 @@ void Entity::SetVector(const Field& field, const std::array<float, 3>& value) co
     Write(field, value.data(), sizeof(value));
 }
 std::int32_t Entity::Integer(const Field& field) const {
-    IntegerType(field.type_);
+    const auto type = field.type_; IntegerType(type);
     alignas(8) std::array<std::byte, 8> bytes{};
     Read(field, bytes.data(), field.size_);
     return std::visit([](auto value) -> std::int32_t {
@@ -344,13 +439,13 @@ std::int32_t Entity::Integer(const Field& field) const {
         if constexpr (std::is_signed_v<decltype(value)>)
             if (value < std::numeric_limits<std::int32_t>::min()) throw Error("Integer exceeds SourcePawn cell range; use decimal text.");
         return static_cast<std::int32_t>(value);
-    }, DecodeInteger(field.type_, bytes.data()));
+    }, DecodeInteger(type, bytes.data()));
 }
 std::string Entity::IntegerText(const Field& field) const {
-    IntegerType(field.type_);
+    const auto type = field.type_; IntegerType(type);
     alignas(8) std::array<std::byte, 8> bytes{};
     Read(field, bytes.data(), field.size_);
-    return std::visit([](auto value) { return std::to_string(value); }, DecodeInteger(field.type_, bytes.data()));
+    return std::visit([](auto value) { return std::to_string(value); }, DecodeInteger(type, bytes.data()));
 }
 float Entity::Number(const Field& field) const {
     double value;

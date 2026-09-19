@@ -4,7 +4,8 @@ public bool OnPluginStart()
 {
     return RegisterCommand("sr_entity_stop", "admin.root", Stop, "Set your pawn velocity to zero")
         && RegisterCommand("sr_entity_model", "admin.root", Model, "Set a model entity asset: <index> <model>")
-        && RegisterCommand("sr_entity_remove", "admin.root", Remove, "Request entity removal: <index>");
+        && RegisterCommand("sr_entity_remove", "admin.root", Remove, "Request entity removal: <index>")
+        && RegisterCommand("sr_entity_spawn", "admin.root", Spawn, "Create a prop: <model> \"x y z\"");
 }
 void Result(Player caller, bool success, const char[] message)
 {
@@ -43,5 +44,22 @@ public void Remove(Player caller, const char[] arguments)
     Entity entity = Target(arguments);
     if (entity == NoEntity) { Result(caller,false,""); return; }
     Result(caller,Entity_Remove(entity),"Entity removal requested.");
+    Entity_Close(entity);
+}
+public void Spawn(Player caller, const char[] arguments)
+{
+    char asset[512], origin[128];
+    if (GetArgumentCount(arguments) != 2 || !GetArgument(arguments,0,asset,sizeof(asset))
+        || !GetArgument(arguments,1,origin,sizeof(origin)))
+    { ReplyToCommand(caller,"Usage: sr_entity_spawn <model asset> \"x y z\""); return; }
+    if (!Entity_ConstructionAvailable()) { Result(caller,false,""); return; }
+    Entity entity = Entity_Create("prop_dynamic");
+    if (entity == NoEntity) { Result(caller,false,""); return; }
+    bool success = Entity_SetKeyString(entity,"model",asset)
+        && Entity_SetKeyString(entity,"origin",origin);
+    bool invoked;
+    if (success) success = Entity_DispatchSpawn(entity,invoked);
+    Result(caller,success,"Prop spawned.");
+    if (!success && invoked) ReplyToCommand(caller,"Spawn was invoked; this construction cannot be retried.");
     Entity_Close(entity);
 }
